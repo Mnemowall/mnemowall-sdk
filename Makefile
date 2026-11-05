@@ -18,7 +18,7 @@ test:
 
 secrets:
 	gitleaks dir --no-banner --redact .
-	gitleaks git --no-banner --redact .
+	gitleaks git --no-banner --redact --log-opts=HEAD .
 
 workflows:
 	uvx zizmor==1.31.1 --offline .github/workflows
