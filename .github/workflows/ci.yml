@@ -90,3 +90,8 @@ jobs:
           name: sbom
           path: sbom.cdx.json
           if-no-files-found: error
+
+  sv-unpinned:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: astral-sh/setup-uv@v10  # SEEDED VIOLATION SV-UNPINNED-ACTION: tag, not SHA
