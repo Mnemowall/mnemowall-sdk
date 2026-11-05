@@ -1,0 +1,92 @@
+# CI gates (§5.3, §7.0). Actions are pinned by commit SHA; versions are >= 7 days old (ADR-0011).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+          python-version: ${{ matrix.python }}
+          enable-cache: false
+      - run: uv --directory packages/python sync --locked
+      - run: uv --directory packages/python run --locked ruff check .
+      - run: uv --directory packages/python run --locked ruff format --check .
+      - run: uv --directory packages/python run --locked mypy
+      - run: uv --directory packages/python run --locked pytest
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks 8.30.1 (checksum-verified binary; the gitleaks-action needs a licence for orgs)
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' -o gitleaks.tgz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+      - run: ./gitleaks git --no-banner --redact .
+      - run: ./gitleaks dir --no-banner --redact .
+
+  zizmor:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+          enable-cache: false
+      - name: zizmor (online audits, read-only token)
+        run: uvx zizmor==1.31.1 --format plain .github/workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+          python-version: "3.14"
+          enable-cache: false
+      - run: uv --directory packages/python sync --locked
+      - name: pip-audit (locked third-party dependencies, hashes required)
+        run: |
+          uv --directory packages/python export --locked --no-emit-project --format requirements-txt --output-file .audit-reqs.txt --quiet
+          uv --directory packages/python run --locked pip-audit --strict --disable-pip --require-hashes -r .audit-reqs.txt
+      - name: SBOM (CycloneDX)
+        run: uv --directory packages/python run --locked cyclonedx-py environment --output-format JSON --output-file "$GITHUB_WORKSPACE/sbom.cdx.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
