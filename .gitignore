@@ -1,0 +1,24 @@
+# secrets — never commit (§1.9)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+# python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+coverage.xml
+# artifacts
+sbom*.json
+# os
+.DS_Store
+.audit-reqs.txt
