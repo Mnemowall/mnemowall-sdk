@@ -22,3 +22,5 @@ sbom*.json
 # os
 .DS_Store
 .audit-reqs.txt
+# macOS AppleDouble metadata
+._*

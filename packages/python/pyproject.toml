@@ -22,8 +22,10 @@ classifiers = [
   "Topic :: Security",
   "Typing :: Typed",
 ]
-# Core has no runtime dependencies and no default network access (§4). Each addition needs an ADR.
-dependencies = []
+# Core keeps a minimal dependency set and no default network access (§4). Each addition needs an ADR.
+dependencies = [
+  "google-re2==1.1.20251105",  # ADR-0017: linear-time regex for every content check
+]
 
 [project.urls]
 Homepage = "https://mnemowall.com"
@@ -62,6 +64,10 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "A", "C4", "PT", "SIM", "RU
 strict = true
 python_version = "3.11"
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["re2"]
+ignore_missing_imports = true  # google-re2 ships no type stubs; wrapped in mnemowall.core.regex
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --strict-config"
