@@ -1,0 +1,27 @@
+# Local hooks only: they use the pinned binaries from bootstrap, so pre-commit never downloads hook repos.
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged)
+        entry: gitleaks git --pre-commit --staged --no-banner --redact
+        language: system
+        pass_filenames: false
+      - id: ruff
+        name: ruff
+        entry: uv --directory packages/python run --locked ruff check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format
+        entry: uv --directory packages/python run --locked ruff format --check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: uv-lock-check
+        name: uv.lock is up to date
+        entry: uv --directory packages/python lock --check
+        language: system
+        files: ^packages/python/(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
