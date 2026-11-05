@@ -5,7 +5,7 @@ build-backend = "uv_build"
 
 [project]
 name = "mnemowall"
-version = "0.0.0"
+version = "0.0.1"
 description = "A firewall plus version control for AI agent memory: provenance on every write, safer reads, rollback."
 readme = "README.md"
 license = "Apache-2.0"
