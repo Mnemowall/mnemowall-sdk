@@ -59,6 +59,9 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "A", "C4", "PT", "SIM", "RU
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+# These tests are about look-alike and fullwidth characters; the "ambiguous" ones are the point.
+"tests/test_signal_s3.py" = ["S101", "RUF001", "RUF003"]
+"tests/test_signal_s4.py" = ["S101", "RUF001", "RUF003"]
 
 [tool.mypy]
 strict = true
