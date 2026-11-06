@@ -9,8 +9,11 @@ from mnemowall.signals.base import SignalResult
 MAX_WRITE_BYTES: Final = 32 * 1024  # D5; lower locally, raise only via signed policy
 
 
-def oversized(content: str) -> bool:
-    return len(content.encode("utf-8")) > MAX_WRITE_BYTES
+def oversized(content: str, limit: int = MAX_WRITE_BYTES) -> bool:
+    """True if ``content`` exceeds ``limit`` UTF-8 bytes. Cheap check first: <= 4 bytes/char."""
+    if len(content) * 4 <= limit:
+        return False
+    return len(content.encode("utf-8", "surrogatepass")) > limit
 
 
 def size_signal(content: str) -> SignalResult:

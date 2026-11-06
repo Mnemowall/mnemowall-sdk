@@ -230,6 +230,11 @@ class ProvenanceSession:
         return trust_min([principal, *(it.trust for it in self._items.values())])
 
 
+def current_session() -> ProvenanceSession | None:
+    """The active session in this context, if any."""
+    return _CURRENT.get()
+
+
 def current_write_trust() -> TrustLevel:
     """Trust for a write happening now. No active session -> ``unknown`` (and a doctor warning)."""
     sess = _CURRENT.get()

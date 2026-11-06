@@ -41,6 +41,7 @@ ALLOWED_FIELDS: Final = frozenset(
         "mode",
         "op",
         "outcome",
+        "policy_id",
         "rule_ids",
         "signal_ids",
         "source_type",

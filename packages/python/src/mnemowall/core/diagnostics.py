@@ -9,9 +9,9 @@ _lock = threading.Lock()
 _counts: Counter[str] = Counter()
 
 
-def record(event: str) -> None:
+def record(event: str, n: int = 1) -> None:
     with _lock:
-        _counts[event] += 1
+        _counts[event] += n
 
 
 def counters() -> dict[str, int]:
