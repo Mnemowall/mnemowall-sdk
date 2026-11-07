@@ -230,9 +230,35 @@ def decide(policy: CompiledPolicy, i: DecisionInputs) -> tuple[Outcome, tuple[st
 
 
 def _text_of(value: Any) -> str:
+    """Serialized size form (D5 cap)."""
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _scan_text(value: Any, depth: int = 0) -> str:
+    """What the signals read: every string in the value on its own line, keys included.
+
+    Scanning the JSON form hid sentence starts behind quotes (``{"text": "Never ...``), so
+    sentence-initial rules missed them (found by the red-team pack, M1a-23). Values are already
+    forgery-stripped and depth-checked; the depth guard here is defensive.
+    """
+    if isinstance(value, str):
+        return value
+    if depth > 100:
+        return ""
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for k, v in value.items():
+            key = k if isinstance(k, str) else ""
+            if isinstance(v, str):
+                lines.append(f"{key}: {v}" if key else v)
+            else:
+                lines += [key, _scan_text(v, depth + 1)]
+        return "\n".join(line for line in lines if line)
+    if isinstance(value, list | tuple):
+        return "\n".join(t for t in (_scan_text(v, depth + 1) for v in value) if t)
+    return "" if value is None else str(value)
 
 
 def _classify(normalized: str) -> MemoryType:
@@ -450,7 +476,8 @@ class PolicyEngine:
                 action, rules = decide(p, inputs(memory_type, fired))
                 return finish(action, rules, signals, fired, memory_type, None, removed,
                               v.value, a.value)  # fmt: skip
-            normalized = normalize(raw)
+            scanned = _scan_text(v.value)
+            normalized = normalize(scanned)
             classified = _classify(normalized)
         except Exception:  # noqa: BLE001 - any engine error must map to a failure mode
             return self._on_error(finish, signals, claimed, None, tainted, failures, alerts,
@@ -459,7 +486,7 @@ class PolicyEngine:
 
         # 4. Content signals and filter verdicts (S6).
         try:
-            signals.extend(_content_signals(raw, normalized, self._known_sinks()))
+            signals.extend(_content_signals(scanned, normalized, self._known_sinks()))
             fired = _fired_labels(signals)
             for verdict in (filter_verdicts or {}).values():
                 if verdict is FilterVerdict.FLAGGED:

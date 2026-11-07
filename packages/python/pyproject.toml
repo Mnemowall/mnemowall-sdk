@@ -37,6 +37,9 @@ langgraph = ["langgraph==1.2.19", "langgraph-checkpoint==4.3.1"]
 [project.scripts]
 mnemowall = "mnemowall.cli:main"
 
+[project.entry-points.pytest11]
+mnemowall_redteam = "mnemowall.redteam.plugin"
+
 [project.urls]
 Homepage = "https://mnemowall.com"
 Source = "https://github.com/mnemowall/mnemowall-sdk"

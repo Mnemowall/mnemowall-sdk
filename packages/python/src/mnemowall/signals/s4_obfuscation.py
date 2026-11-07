@@ -49,6 +49,18 @@ def _script(ch: str) -> str | None:
         return None
 
 
+def _emoji_part(ch: str) -> bool:
+    """A character that can sit on either side of a ZWJ in an emoji sequence."""
+    if not ch:
+        return False
+    cp = ord(ch)
+    return (
+        unicodedata.category(ch) == "So"
+        or cp == 0xFE0F  # emoji presentation selector
+        or 0x1F3FB <= cp <= 0x1F3FF  # skin-tone modifiers
+    )
+
+
 def _scan_chars(text: str, fired: set[str]) -> None:
     word_scripts: set[str] = set()
     n = len(text)
@@ -58,11 +70,11 @@ def _scan_chars(text: str, fired: set[str]) -> None:
         elif ch in _BIDI_CONTROLS:
             fired.add("S4.bidi")
         elif ch == _ZWJ:
+            # Benign only inside an emoji sequence (pictograph, ZWJ, pictograph); a bare or
+            # repeated ZWJ is hidden text (found by the red-team pack, M1a-23).
             prev_ch = text[i - 1] if i > 0 else ""
             next_ch = text[i + 1] if i + 1 < n else ""
-            if (prev_ch.isascii() and prev_ch.isalnum()) or (
-                next_ch.isascii() and next_ch.isalnum()
-            ):
+            if not (_emoji_part(prev_ch) and _emoji_part(next_ch)):
                 fired.add("S4.invisible")
         elif ch not in _BENIGN_CF and not ch.isascii() and unicodedata.category(ch) == "Cf":
             fired.add("S4.invisible")

@@ -122,3 +122,13 @@ def test_ut_sig_s4_009_latency_and_hostile() -> None:
         t0 = time.process_time()
         s4_obfuscation(hostile)
         assert time.process_time() - t0 < 0.05
+
+
+def test_s4_bare_zero_width_joiners_are_hidden_text() -> None:
+    # Red-team finding (M1a-23): ZWJs between spaces were not flagged.
+    assert "S4.invisible" in s4_obfuscation("Ticket \u200d\u200d\u200d resolved.").labels
+    assert "S4.invisible" in s4_obfuscation("a\u200db").labels
+    family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
+    assert "S4.invisible" not in s4_obfuscation(f"Our family {family} photo").labels
+    toned = "\U0001f44d\U0001f3fd\u200d\u2642\ufe0f"
+    assert "S4.invisible" not in s4_obfuscation(f"ok {toned}").labels
