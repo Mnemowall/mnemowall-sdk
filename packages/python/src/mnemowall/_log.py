@@ -46,6 +46,7 @@ ALLOWED_FIELDS: Final = frozenset(
         "provider",
         "reason",
         "rule_ids",
+        "seq",
         "signal_ids",
         "source_type",
         "trust_level",
