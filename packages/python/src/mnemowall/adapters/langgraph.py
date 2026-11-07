@@ -161,6 +161,12 @@ def _check_namespace(ns: Sequence[object], *, allow_wildcard: bool = False) -> t
     return tuple(_check_label(label, allow_wildcard=allow_wildcard) for label in ns)
 
 
+def _check_list_args(kwargs: Mapping[str, Any]) -> None:
+    for name in ("prefix", "suffix"):
+        if kwargs.get(name) is not None:
+            _check_namespace(tuple(kwargs[name]), allow_wildcard=True)
+
+
 def serialize(value: Mapping[str, Any]) -> str:
     """The signed content of a stored value (D26)."""
     return json.dumps(
@@ -214,6 +220,59 @@ class GuardedStore(BaseStore):
         if self._scope is ScopeKind.USER:
             prefix += (_hash_label("p-", principal),)
         return session, prefix
+
+    # --- pre-validation ----------------------------------------------------------------
+    # BaseStore.put / list_namespaces validate labels themselves *before* calling batch, and
+    # LangGraph's InvalidNamespaceError echoes the labels. Check first with our own
+    # content-free NamespaceError (M1a-22), then delegate unchanged.
+
+    def put(
+        self, namespace: tuple[str, ...], key: str, value: Any, *args: Any, **kwargs: Any
+    ) -> None:
+        _check_namespace(namespace)
+        super().put(namespace, key, value, *args, **kwargs)
+
+    async def aput(
+        self, namespace: tuple[str, ...], key: str, value: Any, *args: Any, **kwargs: Any
+    ) -> None:
+        _check_namespace(namespace)
+        await super().aput(namespace, key, value, *args, **kwargs)
+
+    def get(self, namespace: tuple[str, ...], *args: Any, **kwargs: Any) -> Item | None:
+        _check_namespace(namespace)
+        return super().get(namespace, *args, **kwargs)
+
+    async def aget(self, namespace: tuple[str, ...], *args: Any, **kwargs: Any) -> Item | None:
+        _check_namespace(namespace)
+        return await super().aget(namespace, *args, **kwargs)
+
+    def search(
+        self, namespace_prefix: tuple[str, ...], /, *args: Any, **kwargs: Any
+    ) -> list[SearchItem]:
+        _check_namespace(namespace_prefix)
+        return super().search(namespace_prefix, *args, **kwargs)
+
+    async def asearch(
+        self, namespace_prefix: tuple[str, ...], /, *args: Any, **kwargs: Any
+    ) -> list[SearchItem]:
+        _check_namespace(namespace_prefix)
+        return await super().asearch(namespace_prefix, *args, **kwargs)
+
+    def delete(self, namespace: tuple[str, ...], key: str) -> None:
+        _check_namespace(namespace)
+        super().delete(namespace, key)
+
+    async def adelete(self, namespace: tuple[str, ...], key: str) -> None:
+        _check_namespace(namespace)
+        await super().adelete(namespace, key)
+
+    def list_namespaces(self, **kwargs: Any) -> list[tuple[str, ...]]:
+        _check_list_args(kwargs)
+        return super().list_namespaces(**kwargs)
+
+    async def alist_namespaces(self, **kwargs: Any) -> list[tuple[str, ...]]:
+        _check_list_args(kwargs)
+        return await super().alist_namespaces(**kwargs)
 
     # --- batch -------------------------------------------------------------------------
 

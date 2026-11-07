@@ -50,7 +50,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from mnemowall._log import get_logger
 from mnemowall.core import diagnostics
-from mnemowall.core.jcs import JCSError, canonicalize
+from mnemowall.core.jcs import JCSError, canonicalize, utf8_ok
 from mnemowall.core.trust import TrustLevel
 from mnemowall.keys import KeyProvider, KeySet, KeyUnavailable, Purpose
 from mnemowall.ledger.signing import (
@@ -218,10 +218,8 @@ def head_message(ledger_id: str, tenant_id: str, seq: int, digest: str) -> bytes
 def _text(value: object, reason: str) -> str:
     if not isinstance(value, str) or not value:
         raise LedgerError(reason)
-    try:
-        value.encode("utf-8")
-    except UnicodeEncodeError:
-        raise LedgerError(reason) from None
+    if not utf8_ok(value):
+        raise LedgerError(reason)
     return value
 
 
