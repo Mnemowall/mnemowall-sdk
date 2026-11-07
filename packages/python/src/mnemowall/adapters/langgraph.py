@@ -53,7 +53,7 @@ from mnemowall.core import diagnostics
 from mnemowall.core.forgery import strip_returned
 from mnemowall.core.model import MemoryType, Outcome
 from mnemowall.core.provenance import ProvenanceSession, current_session
-from mnemowall.core.trust import Source
+from mnemowall.core.trust import Source, TrustLevel
 from mnemowall.ledger import Ledger
 from mnemowall.policy import CompiledPolicy, WriteRequest, load_engine, load_policy
 from mnemowall.quarantine import Quarantine, QuarantineRefused
@@ -68,6 +68,7 @@ _FORBIDDEN_CHARS: Final = frozenset(".%_")
 _BAD_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
 _log = get_logger("langgraph")
+_TRUST_BY_LABEL: Final = {t.label: t for t in TrustLevel}
 
 
 class NamespaceError(InvalidNamespaceError):
@@ -84,6 +85,22 @@ class MemoryWriteDenied(PermissionError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class RollbackRefused(RuntimeError):
+    """A rollback target can't be restored (I7): unknown, unverified, purged or out of scope."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclasses.dataclass(frozen=True)
+class RollbackResult:
+    outcome: str  # committed | quarantined | deleted
+    memory_id: str
+    to_version: int
+    new_version: int | None
 
 
 class MemoryWriteRefused(RuntimeError):
@@ -222,7 +239,13 @@ class GuardedStore(BaseStore):
 
     # --- writes ------------------------------------------------------------------------
 
-    def _put(self, op: PutOp, session: ProvenanceSession | None, prefix: tuple[str, ...]) -> None:
+    def _put(
+        self,
+        op: PutOp,
+        session: ProvenanceSession | None,
+        prefix: tuple[str, ...],
+        claimed_type: MemoryType | None = None,
+    ) -> None:
         ns = prefix + _check_namespace(op.namespace)
         if not isinstance(op.key, str) or not op.key:
             raise NamespaceError("invalid_key")
@@ -251,6 +274,7 @@ class GuardedStore(BaseStore):
             grants=self._grants,
             target_protected=bool(target_protected),
             target_type=target_type,
+            claimed_type=claimed_type,
         )
         result = self._engine.evaluate(request)
         decision = result.decision
@@ -327,6 +351,64 @@ class GuardedStore(BaseStore):
             index = kept or []
         self._inner.batch([PutOp(ns, op.key, stored, index=index, ttl=op.ttl)])
         return None
+
+    # --- rollback (I7) ------------------------------------------------------------------
+
+    def rollback(self, memory_id: str, to_version: int) -> RollbackResult:
+        """Restore ``to_version`` as a **new write through the full policy** (I7).
+
+        The restored version is first registered in the provenance context at its stored trust,
+        so a rollback can never raise trust: restoring a version that came from an email is
+        written at email trust, and a poisoned instruction is quarantined again by I1. Purged,
+        unverified (tampered or shredded) and out-of-scope versions are refused.
+        """
+        session, prefix = self._context()
+        record = self._ledger.version(memory_id, to_version)
+        if record is None:
+            raise RollbackRefused("unknown_version")
+        if not record.verified or record.signed_fields is None:
+            raise RollbackRefused("unverified")
+        if record.purged:
+            raise RollbackRefused("content_purged")
+        fields = record.fields
+        if tuple(fields.namespace[: len(prefix)]) != prefix or record.key is None:
+            raise RollbackRefused("not_in_scope")
+        head = self._ledger.head(memory_id)
+        before = head.version_no if head is not None else 0
+        if session is not None:
+            session.register_memory_read(
+                memory_id,
+                stored_trust=_TRUST_BY_LABEL.get(fields.trust_level, TrustLevel.UNKNOWN),
+                verified=True,
+                stale=False,  # a deliberate restore of a genuine version, not a replay
+            )
+        caller_ns = tuple(fields.namespace[len(prefix) :])
+        if record.status != "active" or record.content is None:
+            self._put(PutOp(caller_ns, record.key, None), session, prefix)
+            outcome = "deleted"
+        else:
+            value = json.loads(record.content)
+            self._put(
+                PutOp(caller_ns, record.key, value),
+                session,
+                prefix,
+                claimed_type=MemoryType(fields.memory_type),
+            )
+            after = self._ledger.head(memory_id)
+            committed = after is not None and after.version_no > before
+            outcome = "committed" if committed else "quarantined"
+        after = self._ledger.head(memory_id)
+        new_version = after.version_no if after is not None and after.version_no > before else None
+        event: dict[str, object] = {
+            "memory_id": memory_id,
+            "to_version": to_version,
+            "outcome": outcome,
+        }
+        if new_version is not None:
+            event["new_version"] = new_version
+        self._ledger.append_event("rollback", event)
+        _log.info("rollback", extra={"outcome": outcome, "version_no": to_version})
+        return RollbackResult(outcome, memory_id, to_version, new_version)
 
     # --- reads -------------------------------------------------------------------------
 

@@ -65,7 +65,7 @@ SCHEMA_VERSION: Final = 1
 LEDGER_DOMAIN: Final = b"mnemowall/ledger/v1\x00"
 HEAD_DOMAIN: Final = b"mnemowall/ledger-head/v1\x00"
 GENESIS_HASH: Final = "0" * 64
-EVENT_KINDS: Final = frozenset({"quarantine", "review"})
+EVENT_KINDS: Final = frozenset({"quarantine", "review", "rollback"})
 PURGE_REASONS: Final = frozenset({"erasure", "retention"})
 MIN_RETENTION_DAYS: Final = 1
 MAX_RETENTION_DAYS: Final = 3650
@@ -602,7 +602,10 @@ class Ledger:
             )
 
     def append_event(self, kind: str, fields: Mapping[str, object]) -> int:
-        """Append a quarantine or review event. Values must be ids, numbers, booleans or null."""
+        """Append a quarantine, review or rollback event.
+
+        Values must be ids, numbers, booleans or null; no free text reaches the ledger.
+        """
         keys = self._require_keys("append_event")
         if kind not in EVENT_KINDS:
             raise LedgerError("event_kind_invalid")
@@ -818,7 +821,8 @@ class Ledger:
     def events(self) -> list[tuple[int, str, dict[str, object]]]:
         with self._lock:
             found = self._con.execute(
-                "SELECT seq, kind, body FROM entries WHERE kind IN ('quarantine', 'review')"
+                "SELECT seq, kind, body FROM entries"
+                " WHERE kind IN ('quarantine', 'review', 'rollback')"
                 " ORDER BY seq"
             ).fetchall()
         return [(seq, kind, json.loads(body)["fields"]) for seq, kind, body in found]
