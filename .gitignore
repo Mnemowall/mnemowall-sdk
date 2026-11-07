@@ -24,3 +24,5 @@ sbom*.json
 .audit-reqs.txt
 # macOS AppleDouble metadata
 ._*
+# local benchmark output (results are recorded in progress logs)
+bench-results.json
