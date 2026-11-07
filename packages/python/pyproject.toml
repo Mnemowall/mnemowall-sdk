@@ -5,7 +5,7 @@ build-backend = "uv_build"
 
 [project]
 name = "mnemowall"
-version = "0.0.1"
+version = "0.1.0"
 description = "A firewall plus version control for AI agent memory: provenance on every write, safer reads, rollback."
 readme = "README.md"
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.11,<3.15"
 authors = [{ name = "The Mnemowall Authors" }]
 classifiers = [
-  "Development Status :: 1 - Planning",
+  "Development Status :: 3 - Alpha",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",

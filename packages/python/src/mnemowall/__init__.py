@@ -4,4 +4,4 @@ from mnemowall.core.helpers import source
 
 __all__ = ["__version__", "source"]
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
