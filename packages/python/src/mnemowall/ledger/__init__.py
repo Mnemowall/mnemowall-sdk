@@ -25,6 +25,7 @@ from mnemowall.ledger.store import (
     VerifyReport,
     VersionRecord,
     entry_hash,
+    head_message,
 )
 
 __all__ = [
@@ -47,6 +48,7 @@ __all__ = [
     "VersionFields",
     "VersionRecord",
     "entry_hash",
+    "head_message",
     "sign_version",
     "signing_message",
     "verify_version",

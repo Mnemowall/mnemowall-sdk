@@ -208,6 +208,13 @@ def entry_hash(row: _Row | Sequence[Any]) -> str:
     return hashlib.sha256(LEDGER_DOMAIN + canonicalize(doc) + prev).hexdigest()
 
 
+def head_message(ledger_id: str, tenant_id: str, seq: int, digest: str) -> bytes:
+    """What the head signature covers (after ``HEAD_DOMAIN``); shared with offline verification."""
+    return canonicalize(
+        {"ledger_id": ledger_id, "tenant_id": tenant_id, "seq": seq, "hash": digest}
+    )
+
+
 def _text(value: object, reason: str) -> str:
     if not isinstance(value, str) or not value:
         raise LedgerError(reason)
@@ -436,9 +443,34 @@ class Ledger:
         return seq
 
     def _head_message(self, seq: int, digest: str) -> bytes:
-        return canonicalize(
-            {"ledger_id": self._ledger_id, "tenant_id": self._tenant_id, "seq": seq, "hash": digest}
-        )
+        return head_message(self._ledger_id, self._tenant_id, seq, digest)
+
+    # --- evidence (M1a-21) -------------------------------------------------------------
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        """``(ledger_id, tenant_id)``: both are bound into the head signature."""
+        return self._ledger_id, self._tenant_id
+
+    @property
+    def public_keys(self) -> Mapping[str, Any]:
+        """Verification keys (empty when keys are unavailable)."""
+        return self._keys.public_keys if self._keys is not None else {}
+
+    def entries(self) -> list[dict[str, object]]:
+        """Every chain entry, in order. Bodies hold no content or identifiers."""
+        with self._lock:
+            rows = self._con.execute(
+                f"SELECT {_COLUMNS} FROM entries ORDER BY seq"  # noqa: S608 - fixed fragment
+            ).fetchall()
+        names = _COLUMNS.split(", ")
+        return [dict(zip(names, row, strict=True)) for row in rows]
+
+    def signed_head(self) -> tuple[int, str, str] | None:
+        """``(seq, hash, signature)`` of the signed head, or None for an empty ledger."""
+        with self._lock:
+            row = self._con.execute("SELECT seq, hash, signature FROM head WHERE id = 1").fetchone()
+        return None if row is None else (int(row[0]), str(row[1]), str(row[2]))
 
     def _tail(self) -> tuple[int, str]:
         row = self._con.execute(

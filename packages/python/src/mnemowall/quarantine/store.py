@@ -591,6 +591,11 @@ class Quarantine:
         diagnostics.record("pending_buffer_write")
         return "pending_buffer", failure_mode
 
+    def buffered(self) -> int:
+        """How many items are waiting in the pending buffer (``doctor``)."""
+        records, _ = self._buffer_records(self._buffer_path.read_bytes())
+        return len(records)
+
     def drain(self) -> int:
         """Move buffered items into the store (exactly once per item). Returns how many."""
         if self._buffer_aead is None:
