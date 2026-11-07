@@ -73,6 +73,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "A", "C4", "PT", "SIM", "RU
 "tests/test_signal_s4.py" = ["S101", "RUF001", "RUF003"]
 "tests/test_forgery.py" = ["S101", "RUF001", "RUF003"]
 "tests/test_engine.py" = ["S101", "RUF001", "RUF003"]
+"tests/test_read_wrap.py" = ["S101", "RUF001", "RUF003"]
 
 [tool.mypy]
 strict = true

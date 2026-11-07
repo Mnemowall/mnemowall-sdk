@@ -265,7 +265,7 @@ def test_ut_ledger_002_read_log(tmp_path: Path) -> None:
     [
         {"wrap_label": "has space"},
         {"wrap_label": ""},
-        {"version_no": 0},
+        {"version_no": -1},
         {"memory_id": ""},
         {"verified": 1},
     ],

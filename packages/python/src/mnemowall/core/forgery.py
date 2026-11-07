@@ -40,6 +40,7 @@ _CONFUSABLES: Final = str.maketrans(
     "\u0131\u0237\u0261\u0251\u1d20\u0280\ua731",
     "abcdeehiijklmnopqrstuvwxyzabenikvoptuxyzwijgavrs",
 )
+CONFUSABLES: Final = _CONFUSABLES  # public: also used to fold read boundaries
 _SEPARATORS: Final = frozenset("_-. :/\t\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63")
 _TOP_LEVEL: Final = frozenset(
     {"trust", "trustlevel", "source", "sourcetype", "provenance", "verified"}

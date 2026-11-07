@@ -329,6 +329,12 @@ class Ledger:
         data = b"\x00" if content is None else b"\x01" + content.encode("utf-8")
         return self._hmac(_CONTENT_DOMAIN, data)
 
+    def content_hash(self, content: str | None) -> str:
+        """The keyed content HMAC a version signs (D15), for checking content read back."""
+        if self._hkey is None:
+            raise LedgerUnavailable("keys_unavailable")
+        return self._content_hash(content)
+
     def _ref(self, namespace: tuple[str, ...], key: str) -> str:
         return self._hmac(_REF_DOMAIN, canonicalize([list(namespace), key]))
 
@@ -569,7 +575,7 @@ class Ledger:
             if not isinstance(item, ReadItem):
                 raise LedgerError("read_item_invalid")
             _ident(item.memory_id, "read_item_invalid")
-            if type(item.version_no) is not int or item.version_no < 1:
+            if type(item.version_no) is not int or item.version_no < 0:  # 0 = no reference
                 raise LedgerError("read_item_invalid")
             if type(item.verified) is not bool or type(item.stale) is not bool:
                 raise LedgerError("read_item_invalid")
