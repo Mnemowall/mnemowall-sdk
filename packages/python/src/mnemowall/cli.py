@@ -2,6 +2,7 @@
 
 * ``keys init|rotate|status`` (M1a-12)
 * ``review list|show|approve|reject|promote|cancel|complete`` (M1a-14)
+* ``incident MEMORY_ID VERSION`` (M1a-20)
 
 Output never includes key material. ``review list`` shows no content; ``review show`` prints
 content through :func:`mnemowall.core.render.render_untrusted`, so terminal escapes, bidi
@@ -19,6 +20,7 @@ from pathlib import Path
 
 from mnemowall.core.files import PrivatePathError, private_dir
 from mnemowall.core.render import render_untrusted
+from mnemowall.incident import IncidentError, incident_report
 from mnemowall.keys import (
     FileKeyProvider,
     KeychainKeyProvider,
@@ -71,10 +73,18 @@ def _parser() -> argparse.ArgumentParser:
         p = review_actions.add_parser(action, help=text)
         if needs_id:
             p.add_argument("item_id")
-        p.add_argument("--data-dir", type=Path, help="local data directory (ledger, quarantine)")
-        p.add_argument("--tenant", default="default", help="tenant id (default: default)")
-        _key_args(p)
+        _data_args(p)
+    inc = sub.add_parser("incident", help="list every session that read a memory version")
+    inc.add_argument("memory_id")
+    inc.add_argument("version", type=int)
+    _data_args(inc)
     return parser
+
+
+def _data_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--data-dir", type=Path, help="local data directory (ledger, quarantine)")
+    p.add_argument("--tenant", default="default", help="tenant id (default: default)")
+    _key_args(p)
 
 
 def _provider(args: argparse.Namespace, parser: argparse.ArgumentParser) -> KeyProvider:
@@ -165,13 +175,56 @@ def _review_action(action: str, item_id: str | None, q: Quarantine) -> int:
     return 0
 
 
-def _review(args: argparse.Namespace, provider: KeyProvider) -> int:
+def _data_dir(args: argparse.Namespace) -> Path:
     data: Path = args.data_dir or default_key_path().parent / "data"
+    return data
+
+
+def _open_ledger(args: argparse.Namespace, provider: KeyProvider) -> Ledger | None:
     try:
-        private_dir(data)
-        ledger = Ledger.open(data / "ledger.db", provider, tenant_id=args.tenant)
+        private_dir(_data_dir(args))
+        return Ledger.open(_data_dir(args) / "ledger.db", provider, tenant_id=args.tenant)
     except (PrivatePathError, LedgerError) as exc:
         print(f"ledger unavailable: {exc.reason}", file=sys.stderr)
+        return None
+
+
+def _incident(args: argparse.Namespace, provider: KeyProvider) -> int:
+    ledger = _open_ledger(args, provider)
+    if ledger is None:
+        return 2
+    try:
+        r = incident_report(ledger, args.memory_id, args.version)
+    except IncidentError as exc:
+        print(f"incident: {exc.reason}", file=sys.stderr)
+        return 1
+    finally:
+        ledger.close()
+    print(
+        f"memory {r.memory_id} version {r.version_no}: trust {r.trust_level},"
+        f" type {r.effective_type}, verified {'yes' if r.verified else 'NO'}"
+    )
+    print(f"read by {len(r.sessions)} session(s):")
+    for read in r.reads:
+        flags = (
+            ""
+            if read.verified and not read.stale
+            else " (unverified)"
+            if not read.verified
+            else " (stale)"
+        )
+        print(f"  {_when(read.ts_ms)}  {read.session_id}  shown as {read.label}{flags}")
+    if r.purged_read_events:
+        print(f"  {r.purged_read_events} later read event(s) were removed by retention; not shown")
+    later = ", ".join(str(v) for v in r.later_versions) or "none"
+    print(f"later versions: {later} (head: {r.head_version})")
+    return 0
+
+
+def _review(args: argparse.Namespace, provider: KeyProvider) -> int:
+    data = _data_dir(args)
+    ledger = _open_ledger(args, provider)
+    if ledger is None:
         return 2
     try:
         q = Quarantine.open(
@@ -204,4 +257,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     provider = _provider(args, parser)
     if args.command == "keys":
         return _keys(args, provider)
+    if args.command == "incident":
+        return _incident(args, provider)
     return _review(args, provider)
