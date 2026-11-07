@@ -1,4 +1,4 @@
-"""Local ledger (M1a-12/13): signed, hash-chained memory versions. See ADR-0020."""
+"""Local ledger (M1a-12/13): signed, hash-chained, encrypted memory versions. See ADR-0020."""
 
 from mnemowall.ledger.signing import (
     DOMAIN,
@@ -12,15 +12,41 @@ from mnemowall.ledger.signing import (
     signing_message,
     verify_version,
 )
+from mnemowall.ledger.store import (
+    DEFAULT_RETENTION_DAYS,
+    GENESIS_HASH,
+    HEAD_DOMAIN,
+    LEDGER_DOMAIN,
+    Ledger,
+    LedgerError,
+    LedgerUnavailable,
+    ReadEvent,
+    ReadItem,
+    VerifyReport,
+    VersionRecord,
+    entry_hash,
+)
 
 __all__ = [
+    "DEFAULT_RETENTION_DAYS",
     "DOMAIN",
+    "GENESIS_HASH",
+    "HEAD_DOMAIN",
+    "LEDGER_DOMAIN",
     "SIGNED_FIELDS",
     "STATUSES",
+    "Ledger",
+    "LedgerError",
+    "LedgerUnavailable",
+    "ReadEvent",
+    "ReadItem",
     "Signature",
     "SigningError",
+    "VerifyReport",
     "VerifyResult",
     "VersionFields",
+    "VersionRecord",
+    "entry_hash",
     "sign_version",
     "signing_message",
     "verify_version",
