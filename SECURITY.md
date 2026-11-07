@@ -42,3 +42,7 @@ For actively exploited vulnerabilities and severe incidents, we intend to meet t
 ## Note on guarantees
 
 Mnemowall reduces the risk of memory poisoning. It does not eliminate it. Read-time wrapping and detectors are risk reductions, not guarantees.
+
+## Known limitation: in-process signing key (M1a)
+
+In 0.x, memory versions are signed inside the process that runs the Mnemowall SDK, with a key from the OS keychain or a local key file. **If your agent can execute code in that process (a code-interpreter or shell tool), it can read the signing key and produce valid signatures.** In that setup, a valid signature shows only that a version was written through a process holding the key, not that Mnemowall's policy approved it. A separate signer process, keeping the key out of the agent's process, is planned for the gate (M2). `mnemowall keys status` prints this note.

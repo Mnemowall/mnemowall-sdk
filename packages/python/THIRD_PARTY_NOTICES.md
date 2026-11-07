@@ -10,3 +10,12 @@ of the Public Suffix List
 ## google-re2
 Runtime dependency (not vendored). RE2 and its Python bindings are licensed under the BSD 3-Clause
 License (https://github.com/google/re2).
+
+## cryptography
+Runtime dependency (not vendored), used for Ed25519 signatures, AES-256-GCM, HKDF and HMAC.
+Dual-licensed under the Apache License 2.0 or the BSD 3-Clause License
+(https://github.com/pyca/cryptography).
+
+## keyring (optional)
+Installed only with the `keychain` extra (`mnemowall[keychain]`). Licensed under the MIT License
+(https://github.com/jaraco/keyring).
