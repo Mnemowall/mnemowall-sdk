@@ -25,7 +25,15 @@ classifiers = [
 # Core keeps a minimal dependency set and no default network access (§4). Each addition needs an ADR.
 dependencies = [
   "google-re2==1.1.20251105",  # ADR-0017: linear-time regex for every content check
+  "cryptography==50.0.2",  # ADR-0020: Ed25519 signing, AES-256-GCM, HKDF, HMAC (spec §3.6)
 ]
+
+[project.optional-dependencies]
+# ADR-0020 (D13): OS keychain key storage. Optional so the core install stays minimal.
+keychain = ["keyring==25.7.0"]
+
+[project.scripts]
+mnemowall = "mnemowall.cli:main"
 
 [project.urls]
 Homepage = "https://mnemowall.com"
@@ -42,6 +50,7 @@ dev = [
   "pip-audit==2.10.1",
   "cyclonedx-bom==7.6.0",
   "bandit==1.9.4",
+  "rfc8785==0.1.4",  # ADR-0020 (D12): reference JCS for differential tests only
 ]
 
 [tool.uv]
@@ -73,6 +82,10 @@ files = ["src", "tests"]
 [[tool.mypy.overrides]]
 module = ["re2"]
 ignore_missing_imports = true  # google-re2 ships no type stubs; wrapped in mnemowall.core.regex
+
+[[tool.mypy.overrides]]
+module = ["keyring", "keyring.*"]
+ignore_missing_imports = true  # optional extra (D13); not installed in CI, imported lazily
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --strict-config"
