@@ -84,7 +84,7 @@ with guard.session(tenant="acme", principal="alice", agent="assistant", session_
 | Command | What it does |
 |---|---|
 | `mnemowall keys init / rotate / status` | Signing and storage keys (keychain or a 0600 file) |
-| `mnemowall review list / show / approve / reject / promote / cancel / complete` | Review quarantined writes. Approval stores them as data; promotion to an instruction waits at least 24 h |
+| `mnemowall review list / show / approve / reject / promote / cancel / complete` | Review quarantined writes. Approval commits them as data, at their original trust; promotion to an instruction waits at least 24 h. Your app calls `store.deliver_reviewed()` / `memory.deliver_reviewed()` to write approved items into the memory store (idempotent; a newer write always wins) |
 | `mnemowall incident MEMORY_ID VERSION` | Every session that read a version |
 | `mnemowall export --jsonl --out FILE` | Content-free, tamper-evident evidence |
 | `mnemowall verify-ledger [--export FILE] [--expected-head SEQ:HASH]` | Verify the ledger or an export |

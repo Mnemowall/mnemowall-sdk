@@ -827,3 +827,49 @@ def test_can_quarantine_at_rest(env: Env, monkeypatch: pytest.MonkeyPatch) -> No
     env.q.close()
     env.ledger.checkpoint()
     assert scan(files) == []
+
+
+# --- M1b-14: quarantined deletes (D46) ------------------------------------------------------
+
+
+def test_ut_quar_delete_op_approval_commits_a_deletion(env: Env) -> None:
+    res = env.q.submit(
+        decision=QUARANTINED.decision,
+        namespace=("users", "u-1"),
+        key="k1",
+        content="",
+        scope="user",
+        bundle_id="builtin-default",
+        provenance={},
+        op="delete",
+    )
+    rec = env.q.approve(res.item_id)
+    assert (rec.status, rec.content) == ("deleted", None)
+    other = env.q.submit(
+        decision=QUARANTINED.decision,
+        namespace=("users", "u-1"),
+        key="k2",
+        content="",
+        scope="user",
+        bundle_id="builtin-default",
+        provenance={},
+        op="delete",
+    )
+    with pytest.raises(QuarantineError, match="not_promotable"):
+        env.q.promote(other.item_id)
+
+
+def test_ut_quar_write_op_is_the_default_and_bad_ops_refused(env: Env) -> None:
+    rec = env.q.approve(submit(env.q).item_id)
+    assert (rec.status, rec.content) == ("active", INSTRUCTION)
+    with pytest.raises(QuarantineError, match="payload_invalid"):
+        env.q.submit(
+            decision=QUARANTINED.decision,
+            namespace=("users", "u-1"),
+            key="k3",
+            content="x",
+            scope="user",
+            bundle_id="builtin-default",
+            provenance={},
+            op="drop",
+        )

@@ -30,5 +30,6 @@ First usable release (alpha).
   - wrapped `memory` on read;
   - rollback through policy.
 - **Shared adapter contract suite:** the same tests run against LangGraph and Mem0.
+- **Review delivery:** `deliver_reviewed()` on both adapters writes approved and promoted items into the memory store. It is idempotent, a newer write wins, and it stays within the adapter's tenant, scope and backend. An approved quarantined *delete* now commits a deletion, and can't be promoted.
 - **CLI:** `keys`, `review`, `incident`, `export`, `verify-ledger`, `doctor`, `redteam`.
 - **Red-team pack v0** (T1a, T1d, T5, T6, T8, T10), `make bench` and `make demo`.

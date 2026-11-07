@@ -48,6 +48,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
 from mnemowall._log import get_logger
 from mnemowall.adapters._common import (
+    ROOT,
     TRUST_BY_LABEL,
     MemoryWriteDenied,
     MemoryWriteRefused,
@@ -55,6 +56,7 @@ from mnemowall.adapters._common import (
     RollbackRefused,
     RollbackResult,
     hash_label,
+    reviewed_heads,
     scope_prefix,
     serialize,
 )
@@ -72,6 +74,9 @@ from mnemowall.signals.write import Op as WriteOp
 from mnemowall.signals.write import Scope, ScopeKind
 
 MEM0: Final = "mem0"
+# The ledger namespace label after the scope prefix. "_" can't appear in a LangGraph label (D22),
+# so a LangGraph caller namespace can never collide with a Mem0 one in a shared ledger.
+NS_LABEL: Final = "_mem0"
 KEY_FIELD: Final = "_mnemowall_key"
 REF_FIELD: Final = "_mnemowall_ref"
 LABEL_KEY: Final = "mnemowall"
@@ -129,11 +134,18 @@ class InvalidMessage(ValueError):
         self.reason = "invalid_message"
 
 
-def derive_user_id(tenant_id: str, scope: str, principal: str) -> str:
-    """The Mem0 ``user_id`` the wrapper uses for a tenant, scope and principal (D35)."""
-    who = principal if scope == ScopeKind.USER.value else ""
-    material = "\0".join((tenant_id, scope, who)).encode("utf-8", "surrogatepass")
+def _user_id_for(prefix: Sequence[str]) -> str:
+    material = "\0".join(prefix).encode("utf-8", "surrogatepass")
     return "mw" + hashlib.sha256(material).hexdigest()[:32]
+
+
+def derive_user_id(tenant_id: str, scope: str, principal: str) -> str:
+    """The Mem0 ``user_id`` the wrapper uses for a tenant, scope and principal (D35, D47).
+
+    Derived from the hashed scope prefix, so it can also be computed from a ledger namespace
+    (review delivery runs without a session).
+    """
+    return _user_id_for(scope_prefix(tenant_id, ScopeKind(scope), principal))
 
 
 def telemetry_enabled() -> bool:
@@ -284,7 +296,7 @@ class _Tracked:
     key: str | None
     agent_id: str | None
     run_id: str | None
-    head: VersionRecord | None  # set only when the item verifies as the current head
+    head: VersionRecord | None  # the ledger head, when the item is a genuine version of it
 
 
 class _Core:
@@ -346,7 +358,7 @@ class _Core:
         )
 
     def _ns(self, ctx: _Ctx, agent_id: str | None, run_id: str | None) -> tuple[str, ...]:
-        ns = (*ctx.prefix, MEM0)
+        ns = (*ctx.prefix, NS_LABEL)
         if agent_id is not None:
             ns += (hash_label("a-", agent_id),)
         if run_id is not None:
@@ -420,6 +432,7 @@ class _Core:
         content: str,
         protected: bool,
         prov: dict[str, object],
+        op: str = "write",
     ) -> str:
         try:
             res = self._quarantine.submit(
@@ -431,6 +444,7 @@ class _Core:
                 protected=protected,
                 bundle_id=decision.policy_id,
                 provenance=prov,
+                op=op,
             )
         except QuarantineRefused as exc:
             raise MemoryWriteRefused(exc.reason) from None
@@ -665,7 +679,7 @@ class _Core:
         try:
             ns = self._ns(ctx, _check_id(item.get("agent_id")), _check_id(item.get("run_id")))
         except NamespaceError:
-            ns = (*ctx.prefix, MEM0, "invalid")
+            ns = (*ctx.prefix, NS_LABEL, "invalid")
         score = item.get("score")
         backend = BackendItem(
             content=content,
@@ -729,7 +743,7 @@ class _Core:
         _, _, key, _ = self._parse(item)
         check = verify_item(self._ledger, backend)
         head = None
-        if check.verified and not check.stale:
+        if check.verified:  # current or a genuine older version (stale): same ledger memory
             head = self._ledger.head(check.memory_id)
         return _Tracked(
             item,
@@ -844,7 +858,7 @@ class _Core:
         prov = self._provenance(decision, tracked.agent_id, tracked.run_id)
         key = tracked.key or "k-" + uuid.uuid4().hex
         if decision.action is Outcome.QUARANTINE:
-            item_id = self._quarantine_submit(decision, ns, key, "", protected, prov)
+            item_id = self._quarantine_submit(decision, ns, key, "", protected, prov, op="delete")
             return {
                 "message": "Memory deletion quarantined for review.",
                 LABEL_KEY: {"outcome": "quarantined", "item_id": item_id},
@@ -874,6 +888,82 @@ class _Core:
             counts["quarantined" if out[LABEL_KEY]["outcome"] == "quarantined" else "deleted"] += 1
         return counts
 
+    # --- review delivery (M1b-14) -------------------------------------------------------
+
+    def deliver_reviewed(self) -> dict[str, int]:
+        """Write approved or promoted quarantine items into Mem0 (D45). See the LangGraph twin.
+
+        Idempotent (an item already carrying the head's signature is left alone); a newer write
+        wins. Runs without a session, for this wrapper's tenant and scope only. Mem0 errors are
+        counted as ``skipped`` and never raised (they can quote content).
+        """
+        counts = {"delivered": 0, "already": 0, "superseded": 0, "skipped": 0}
+        base = (ROOT, hash_label("t-", self._tenant_id), self._scope.value)
+        width = len(base) + (1 if self._scope is ScopeKind.USER else 0)
+        for target in reviewed_heads(self._ledger, self._quarantine, base, counts):
+            ns, key, head = target.namespace, target.key, target.head
+            if len(ns) <= width or ns[width] != NS_LABEL:
+                continue  # another adapter's namespace
+            agent, run = target.provenance.get("agent_id"), target.provenance.get("run_id")
+            agent = agent if isinstance(agent, str) else None
+            run = run if isinstance(run, str) else None
+            prefix = ns[:width]
+            expected = (*prefix, NS_LABEL)
+            expected += (hash_label("a-", agent),) if agent is not None else ()
+            expected += (hash_label("r-", run),) if run is not None else ()
+            if ns != expected:
+                counts["skipped"] += 1
+                continue
+            try:
+                outcome = self._deliver_one(_user_id_for(prefix), key, head, agent, run)
+            except MemoryWriteRefused:
+                counts["skipped"] += 1
+                continue
+            counts[outcome] += 1
+            if outcome == "delivered":
+                _log.info("review_delivered", extra={"adapter": MEM0})
+        return counts
+
+    def _deliver_one(
+        self, user_id: str, key: str, head: VersionRecord, agent: str | None, run: str | None
+    ) -> str:
+        filters: dict[str, Any] = {"user_id": user_id, KEY_FIELD: key}
+        if agent is not None:
+            filters["agent_id"] = agent
+        if run is not None:
+            filters["run_id"] = run
+        found = self._backend("get_all", filters=filters, top_k=MAX_SCAN)
+        live = [
+            dict(i)
+            for i in found.get("results", [])
+            if isinstance(i, Mapping) and i.get("user_id") == user_id
+        ]
+        if head.status != "active" or head.content is None:
+            for item in live:
+                self._backend("delete", item["id"])
+            return "delivered" if live else "already"
+        for item in live:
+            ref = (item.get("metadata") or {}).get(REF_FIELD)
+            if isinstance(ref, Mapping) and ref.get("signature") == head.signature:
+                return "already"
+        value = json.loads(head.content)
+        meta = {**value["metadata"], KEY_FIELD: key, REF_FIELD: self._ref(head)}
+        if live:
+            self._backend("update", live[0]["id"], text=value["memory"], metadata=meta)
+        else:
+            mem_id = self._backend(
+                "add",
+                [{"role": "user", "content": value["memory"]}],
+                user_id=user_id,
+                agent_id=agent,
+                run_id=run,
+                metadata=meta,
+                infer=False,
+            )
+            if mem_id is None:
+                raise MemoryWriteRefused("backend_error")
+        return "delivered"
+
     # --- rollback (I7) -----------------------------------------------------------------
 
     def rollback(self, memory_id: str, to_version: int) -> RollbackResult:
@@ -888,7 +978,7 @@ class _Core:
             raise RollbackRefused("content_purged")
         fields = record.fields
         ns = tuple(fields.namespace)
-        base = (*ctx.prefix, MEM0)
+        base = (*ctx.prefix, NS_LABEL)
         if ns[: len(base)] != base or record.key is None:
             raise RollbackRefused("not_in_scope")
         head = self._ledger.head(memory_id)
