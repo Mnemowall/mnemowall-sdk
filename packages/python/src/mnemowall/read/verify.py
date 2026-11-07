@@ -5,6 +5,9 @@ Each item a backend returns is checked against the ledger before the model sees 
 * no Mnemowall reference, unknown version, signature mismatch, a ledger row that fails its own
   signature, content that doesn't match the signed content HMAC, or a version the ledger marks
   deleted -> ``unverified``;
+* a genuine version found somewhere other than the namespace and key it was signed for (a
+  copy into another key, namespace or principal) -> ``unverified`` (``location_mismatch``,
+  M1b-01). Adapters pass ``location``; without it this check is skipped (raw core API, weaker);
 * a genuine version that is not the ledger head (a replay) -> ``stale``.
 
 Unverified and stale items are still returned (never dropped), wrapped, alerted on (counter and
@@ -25,7 +28,7 @@ from mnemowall._log import get_logger
 from mnemowall.core import diagnostics
 from mnemowall.core.provenance import ProvenanceSession, current_session
 from mnemowall.core.trust import TrustLevel
-from mnemowall.ledger import Ledger, LedgerError, ReadItem
+from mnemowall.ledger import Ledger, LedgerError, ReadItem, VersionRecord
 from mnemowall.policy import CompiledPolicy
 from mnemowall.read.wrap import MemoryView, WrappedRead, _token, wrap_read
 
@@ -52,6 +55,7 @@ class BackendItem:
     source: str = "memory"
     created_ms: int | None = None
     relevance: float | None = None
+    location: tuple[tuple[str, ...], str] | None = None  # (namespace, key) where it was found
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +87,20 @@ def _unverified(item: BackendItem, reason: str) -> ReadCheck:
     return ReadCheck(mid, version, False, False, reason, TrustLevel.UNKNOWN, "data")
 
 
+def _located(ledger: Ledger, record: VersionRecord, location: tuple[tuple[str, ...], str]) -> bool:
+    """Was this version signed for the namespace and key the item was found at? (D32)
+
+    The namespace is an Ed25519-signed field; the key is bound through the ledger's
+    hash-chained ``ref_hmac`` lookup, which maps one (namespace, key) to one memory id.
+    """
+    namespace, key = location
+    try:
+        signed = tuple(record.fields.namespace) == tuple(namespace)
+        return signed and ledger.find(namespace, key) == record.memory_id
+    except (LedgerError, TypeError, ValueError, UnicodeEncodeError):
+        return False
+
+
 def verify_item(ledger: Ledger, item: BackendItem) -> ReadCheck:
     """Check one backend item against the ledger. Never raises for bad data."""
     if ledger.locked:
@@ -110,6 +128,8 @@ def verify_item(ledger: Ledger, item: BackendItem) -> ReadCheck:
         matches = False
     if not matches:
         return _unverified(item, "content_mismatch")
+    if item.location is not None and not _located(ledger, record, item.location):
+        return _unverified(item, "location_mismatch")
     if not ledger.is_head(record.memory_id, record.version_no):
         diagnostics.record("read_stale")
         _log.warning("read_stale", extra={"version_no": record.version_no})

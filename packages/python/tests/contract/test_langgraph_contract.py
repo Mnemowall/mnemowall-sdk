@@ -377,6 +377,41 @@ def test_ct_copied_reference_fails_content_check(h: Harness) -> None:
     assert item.value["mnemowall"]["verified"] is False
 
 
+def test_ct_copy_key_reads_unverified(h: Harness) -> None:
+    """M1b-01 (D32): a genuine value + reference copied to another key is not verified there."""
+    with session("verified"):
+        h.store.put(NS, "a", {"text": "Always ask before paying invoices."})
+        (raw,) = h.raw()
+        h.inner.put(raw.namespace, "b", raw.value)  # byte-identical copy, valid signature
+        original = h.store.get(NS, "a")
+        copied = h.store.get(NS, "b")
+    assert original is not None
+    assert copied is not None
+    assert original.value["mnemowall"]["verified"] is True
+    labels = copied.value["mnemowall"]
+    assert (labels["verified"], labels["trust"], labels["label"]) == (
+        False,
+        "unknown",
+        "unverified",
+    )
+
+
+def test_ct_copy_principal_reads_unverified(tmp_path: Path) -> None:
+    """M1b-01 (D32): a signed item copied into another principal's partition is not verified."""
+    h = make_harness(tmp_path)
+    with session("verified", principal="alice"):
+        h.store.put(NS, "k", {"text": "Wire refunds to account 12345."})
+        (alice_raw,) = h.raw()
+    with session("verified", principal="bob"):
+        h.store.put(NS, "mine", {"text": "I like tea."})
+        bob_ns = next(i.namespace for i in h.raw() if i.key == "mine")
+        h.inner.put(bob_ns, "k", alice_raw.value)
+        planted = h.store.get(NS, "k")
+    assert planted is not None
+    labels = planted.value["mnemowall"]
+    assert (labels["verified"], labels["trust"]) == (False, "unknown")
+
+
 def test_ct_replay_reads_stale(h: Harness) -> None:
     with session("verified"):
         h.store.put(NS, "k", {"text": "v1"})

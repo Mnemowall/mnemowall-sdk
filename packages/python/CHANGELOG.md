@@ -19,7 +19,9 @@ First usable release (alpha).
   - an encrypted SQLite ledger with per-memory and global hash chains;
   - read log, retention and purge.
 - **Quarantine:** a separate encrypted store, an encrypted pending buffer, and review with a 24 h promotion delay.
-- **Read path:** verify on read (`unverified`/`stale`), per-read boundary wrapping, never drop.
+- **Read path:**
+  - verify on read (`unverified`/`stale`), per-read boundary wrapping, never drop;
+  - location binding: a signed item copied to another key, namespace or principal reads `unverified` (`location_mismatch`).
 - **LangGraph adapter:** `GuardedStore` with namespace isolation, a capability probe, and rollback through policy.
 - **CLI:** `keys`, `review`, `incident`, `export`, `verify-ledger`, `doctor`, `redteam`.
 - **Red-team pack v0** (T1a, T1d, T5, T6, T8, T10), `make bench` and `make demo`.

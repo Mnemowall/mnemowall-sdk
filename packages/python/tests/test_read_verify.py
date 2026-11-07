@@ -254,3 +254,35 @@ def test_ut_verify_009_backend_returns_content_the_ledger_deleted(ledger: Ledger
     purged = verify_item(ledger, item(rec, content="secret"))
     assert purged.verified  # the signature covers the content HMAC, which purge keeps
     assert purged.stale
+
+
+# --- UT-READ-LOC (M1b-01, D32) -------------------------------------------------------------
+
+
+def located(rec: VersionRecord, namespace: tuple[str, ...], key: str) -> BackendItem:
+    base = item(rec)
+    return BackendItem(content=base.content, ref=base.ref, location=(namespace, key))
+
+
+def test_ut_read_loc_001_location_must_match_the_signed_namespace_and_key(ledger: Ledger) -> None:
+    rec = put(ledger, key="k1")
+    ok = verify_item(ledger, located(rec, ("users", "u-1"), "k1"))
+    assert (ok.verified, ok.reason) == (True, "ok")
+    for namespace, key in ((("users", "u-1"), "k2"), (("users", "u-2"), "k1"), (("users",), "k1")):
+        check = verify_item(ledger, located(rec, namespace, key))
+        assert (check.verified, check.stale, check.reason) == (False, False, "location_mismatch")
+        assert check.trust is TrustLevel.UNKNOWN
+    assert diagnostics.counters()["read_unverified"] == 3
+
+
+def test_ut_read_loc_001_mismatch_wins_over_stale(ledger: Ledger) -> None:
+    old = put(ledger, key="k1")
+    put(ledger, "newer", key="k1")
+    check = verify_item(ledger, located(old, ("users", "u-1"), "other"))
+    assert check.reason == "location_mismatch"
+
+
+def test_ut_read_loc_002_no_location_keeps_previous_behaviour(ledger: Ledger) -> None:
+    rec = put(ledger, key="k1")
+    assert item(rec).location is None
+    assert verify_item(ledger, item(rec)).reason == "ok"
