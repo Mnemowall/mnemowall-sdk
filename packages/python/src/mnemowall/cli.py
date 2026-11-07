@@ -4,6 +4,7 @@
 * ``review list|show|approve|reject|promote|cancel|complete`` (M1a-14)
 * ``incident MEMORY_ID VERSION`` (M1a-20)
 * ``export --jsonl``, ``verify-ledger``, ``doctor`` (M1a-21)
+* ``redteam [--unprotected]`` (M1a-23)
 
 Output never includes key material. ``review list`` shows no content; ``review show`` prints
 content through :func:`mnemowall.core.render.render_untrusted`, so terminal escapes, bidi
@@ -100,6 +101,10 @@ def _parser() -> argparse.ArgumentParser:
     _data_args(ver)
     doc = sub.add_parser("doctor", help="report unsafe or degraded settings")
     _data_args(doc)
+    rt = sub.add_parser(
+        "redteam", help="run the red-team poisoning pack (needs the langgraph extra)"
+    )
+    rt.add_argument("--unprotected", action="store_true", help="run against a plain store")
     return parser
 
 
@@ -276,6 +281,8 @@ def _review(args: argparse.Namespace, provider: KeyProvider) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "redteam":
+        return _redteam(args)
     provider = _provider(args, parser)
     if args.command == "keys":
         return _keys(args, provider)
@@ -288,6 +295,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "doctor":
         return _doctor(args, provider)
     return _review(args, provider)
+
+
+def _redteam(args: argparse.Namespace) -> int:
+    from mnemowall.redteam import run_pack  # needs the langgraph extra
+
+    report = run_pack(protected=not args.unprotected)
+    print(report.render())
+    return 0 if report.passed else 1
 
 
 def _export(args: argparse.Namespace, provider: KeyProvider) -> int:

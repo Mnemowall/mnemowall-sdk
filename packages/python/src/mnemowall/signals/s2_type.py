@@ -57,6 +57,9 @@ _INSTRUCTION_RULES: Final = [
         r"(?i)\b(assistant|agent|ai|bot|model|chatbot)\s+(should|must|shall|will|always|never)\b",
     ),
     ("S2.always_verb", 0.7, r"(?i)\b(always|never)\s+(\w+\s+){0,2}?(" + _VERBS + r")\b"),
+    # A sentence that *opens* with "Always"/"Never" is an imperative whatever the verb
+    # ("Always ask...", "Never apply..."): found by the red-team pack (M1a-23).
+    ("S2.always_lead", 0.7, r"(?i)(^|[.!?:\]\n]\s*)(always|never)\s+[a-z]{2,}"),
     (
         "S2.cond_action",
         0.6,
