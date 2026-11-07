@@ -3,6 +3,7 @@
 * ``keys init|rotate|status`` (M1a-12)
 * ``review list|show|approve|reject|promote|cancel|complete`` (M1a-14)
 * ``incident MEMORY_ID VERSION`` (M1a-20)
+* ``export --jsonl``, ``verify-ledger``, ``doctor`` (M1a-21)
 
 Output never includes key material. ``review list`` shows no content; ``review show`` prints
 content through :func:`mnemowall.core.render.render_untrusted`, so terminal escapes, bidi
@@ -13,6 +14,7 @@ codes only.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from mnemowall.core.files import PrivatePathError, private_dir
 from mnemowall.core.render import render_untrusted
+from mnemowall.doctor import exit_code, run_checks
 from mnemowall.incident import IncidentError, incident_report
 from mnemowall.keys import (
     FileKeyProvider,
@@ -32,6 +35,7 @@ from mnemowall.keys import (
     status_lines,
 )
 from mnemowall.ledger import Ledger, LedgerError
+from mnemowall.ledger.export import export_jsonl, verify_export
 from mnemowall.policy import load_policy
 from mnemowall.quarantine import ItemSummary, Quarantine, QuarantineError
 
@@ -78,6 +82,24 @@ def _parser() -> argparse.ArgumentParser:
     inc.add_argument("memory_id")
     inc.add_argument("version", type=int)
     _data_args(inc)
+    exp = sub.add_parser("export", help="export the ledger as tamper-evident evidence")
+    exp.add_argument(
+        "--jsonl", action="store_true", required=True, help="JSON Lines (the only format)"
+    )
+    exp.add_argument(
+        "--out", type=Path, required=True, help="new file to write (never overwritten)"
+    )
+    _data_args(exp)
+    ver = sub.add_parser("verify-ledger", help="verify the ledger (or an export) end to end")
+    ver.add_argument(
+        "--expected-head", help="SEQ:HASH from an earlier export; catches deleted entries"
+    )
+    ver.add_argument(
+        "--export", type=Path, help="verify this export offline instead of the live ledger"
+    )
+    _data_args(ver)
+    doc = sub.add_parser("doctor", help="report unsafe or degraded settings")
+    _data_args(doc)
     return parser
 
 
@@ -259,4 +281,100 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _keys(args, provider)
     if args.command == "incident":
         return _incident(args, provider)
+    if args.command == "export":
+        return _export(args, provider)
+    if args.command == "verify-ledger":
+        return _verify_ledger(args, provider)
+    if args.command == "doctor":
+        return _doctor(args, provider)
     return _review(args, provider)
+
+
+def _export(args: argparse.Namespace, provider: KeyProvider) -> int:
+    ledger = _open_ledger(args, provider)
+    if ledger is None:
+        return 2
+    try:
+        fd = os.open(args.out, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        print("export: the output file exists; choose a new path", file=sys.stderr)
+        ledger.close()
+        return 1
+    count = 0
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        for line in export_jsonl(ledger):
+            fh.write(line + "\n")
+            count += 1
+    head = ledger.signed_head()
+    ledger.close()
+    print(f"exported {count} lines to {args.out}")
+    if head is not None:
+        print(f"head {head[0]}:{head[1]}  (keep this somewhere else; pass it to --expected-head)")
+    return 0
+
+
+def _parse_head(text: str | None) -> tuple[int, str] | None:
+    if text is None:
+        return None
+    seq, _, digest = text.partition(":")
+    if not seq.isdigit() or len(digest) != 64:
+        raise SystemExit("verify-ledger: --expected-head must be SEQ:HASH")
+    return int(seq), digest
+
+
+def _verify_ledger(args: argparse.Namespace, provider: KeyProvider) -> int:
+    expected = _parse_head(args.expected_head)
+    if args.export is not None:
+        try:
+            keys = provider.load().public_keys
+        except KeyUnavailable as exc:
+            print(f"keys unavailable: {exc.reason}; pin the verification keys", file=sys.stderr)
+            return 2
+        lines = args.export.read_text(encoding="utf-8").splitlines()
+        report = verify_export(lines, keys, expected_head=expected)
+    else:
+        ledger = _open_ledger(args, provider)
+        if ledger is None:
+            return 2
+        try:
+            report = ledger.verify(expected_head=expected)
+        except LedgerError as exc:
+            print(f"ledger unavailable: {exc.reason}", file=sys.stderr)
+            return 2
+        finally:
+            ledger.close()
+    if report.ok:
+        print(f"ok: {report.checked} entries verified")
+        return 0
+    print(f"FAILED at entry {report.failed_at}: {report.reason}")
+    return 1
+
+
+def _doctor(args: argparse.Namespace, provider: KeyProvider) -> int:
+    ledger = _open_ledger(args, provider)
+    quarantine = None
+    if ledger is not None:
+        try:
+            quarantine = Quarantine.open(
+                _data_dir(args) / "quarantine",
+                provider,
+                ledger=ledger,
+                policy=load_policy(),
+                tenant_id=args.tenant,
+            )
+        except QuarantineError as exc:
+            print(f"quarantine unavailable: {exc.reason}", file=sys.stderr)
+    findings = run_checks(
+        provider=provider, ledger=ledger, quarantine=quarantine, policy=load_policy(), counters={}
+    )
+    for f in findings:
+        print(f"{f.severity:7} {f.code}: {f.message}")
+    print(
+        "note: in-process counters (writes without a session, unverified reads, ...) are only"
+        " visible to mnemowall.doctor.run_checks() inside your application"
+    )
+    if quarantine is not None:
+        quarantine.close()
+    if ledger is not None:
+        ledger.close()
+    return exit_code(findings) if ledger is not None else 2

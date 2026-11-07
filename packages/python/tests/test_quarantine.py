@@ -688,6 +688,7 @@ def test_ut_quar_008_nothing_but_review_releases(env: Env) -> None:
         "locked",
         "directory",
         "buffer_limits",
+        "buffered",
     }
     assert env.ledger.find(("users", "u-1"), "k1") is None
 
