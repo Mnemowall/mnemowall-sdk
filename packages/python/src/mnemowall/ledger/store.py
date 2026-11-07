@@ -50,6 +50,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from mnemowall._log import get_logger
 from mnemowall.core import diagnostics
+from mnemowall.core.files import PrivatePathError, private_dir
 from mnemowall.core.jcs import JCSError, canonicalize, utf8_ok
 from mnemowall.core.trust import TrustLevel
 from mnemowall.keys import KeyProvider, KeySet, KeyUnavailable, Purpose
@@ -1019,6 +1020,11 @@ def _prepare_file(path: Path) -> None:
     try:
         st = os.lstat(path)
     except FileNotFoundError:
+        if not path.parent.exists():
+            try:
+                private_dir(path.parent)
+            except PrivatePathError as exc:
+                raise LedgerError(exc.reason) from None
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:

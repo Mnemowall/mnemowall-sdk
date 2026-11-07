@@ -871,6 +871,14 @@ def test_ut_ledger_009_file_permissions_and_pragmas(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
+def test_ut_ledger_009_missing_parent_created_private(tmp_path: Path) -> None:
+    path = tmp_path / "new" / "dir" / "ledger.db"
+    open_ledger(path).close()
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
 def test_ut_ledger_009_loose_existing_file_refused(tmp_path: Path) -> None:
     path = tmp_path / "ledger.db"
     open_ledger(path).close()
