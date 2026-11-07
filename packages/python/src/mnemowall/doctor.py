@@ -46,6 +46,16 @@ _COUNTER_FINDINGS: Final = {
         "principal_mismatch",
         "a caller passed a user id that differs from the session principal (denied)",
     ),
+    "policy_weakened": (
+        "warning",
+        "policy_weakened",
+        "a signed local policy weaker than the built-in default is in effect",
+    ),
+    "policy_signature_invalid": (
+        "error",
+        "policy_signature_invalid",
+        "a local policy file was refused (unsigned, edited or untrusted key); strict default used",
+    ),
     "mem0_telemetry_enabled": (
         "warning",
         "mem0_telemetry_enabled",

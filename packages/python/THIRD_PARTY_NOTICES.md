@@ -28,3 +28,7 @@ Installed only with the `langgraph` extra (`mnemowall[langgraph]`). Licensed und
 Installed only with the `mem0` extra (`mnemowall[mem0]`). Licensed under the Apache License 2.0
 (https://github.com/mem0ai/mem0). It brings in `qdrant-client` (Apache-2.0), `openai`, `posthog`
 and `sqlalchemy` as its own dependencies.
+
+## PyYAML (optional)
+Installed only with the `yaml` extra (`mnemowall[yaml]`); used through `yaml.safe_load` only.
+Licensed under the MIT License (https://github.com/yaml/pyyaml).
