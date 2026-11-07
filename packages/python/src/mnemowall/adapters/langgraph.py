@@ -508,6 +508,7 @@ class GuardedStore(BaseStore):
                     ref=ref,
                     created_ms=int(item.created_at.timestamp() * 1000),
                     relevance=getattr(item, "score", None),
+                    location=(tuple(item.namespace), item.key),
                 )
             )
         read = read_memories(
