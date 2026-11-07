@@ -186,8 +186,12 @@ class KeySet:
         return json.dumps(doc, sort_keys=True)
 
     @classmethod
-    def _from_document(cls, text: str) -> KeySet:
-        """Parse a stored document; any inconsistency raises ``ValueError`` (no detail)."""
+    def _parse(cls, text: str) -> KeySet | None:
+        """Parse a stored document; None on any inconsistency.
+
+        Returning (not raising) means no parser error, which can hold key material, is ever
+        attached to the exception callers see.
+        """
         try:
             doc = json.loads(text)
             if not isinstance(doc, dict) or doc.get("format") != FORMAT:
@@ -209,7 +213,7 @@ class KeySet:
                 raise ValueError("active")
             return cls(signing, pubs, _unb64(doc["storage_secret"]))
         except (ValueError, TypeError, KeyError, AttributeError):  # incl. binascii.Error
-            raise ValueError("key_store_corrupt") from None
+            return None
 
 
 class KeyProvider(Protocol):
@@ -246,10 +250,10 @@ class _DocumentProvider:
         text = self._read()
         if text is None:
             return None
-        try:
-            return KeySet._from_document(text)
-        except ValueError:
-            raise _unavailable(self.name, "key_store_corrupt") from None
+        keys = KeySet._parse(text)
+        if keys is None:
+            raise _unavailable(self.name, "key_store_corrupt")
+        return keys
 
     def load(self) -> KeySet:
         keys = self.load_or_none()
@@ -338,10 +342,10 @@ class FileKeyProvider(_DocumentProvider):
                 data = fh.read()
         except OSError:
             raise _unavailable(self.name, "read_error") from None
-        try:
-            return data.decode("utf-8")
-        except UnicodeDecodeError:
-            raise _unavailable(self.name, "key_store_corrupt") from None
+        text = _decode(data)
+        if text is None:
+            raise _unavailable(self.name, "key_store_corrupt")
+        return text
 
     def _write(self, document: str) -> None:
         self._check()
@@ -404,20 +408,33 @@ class KeychainKeyProvider(_DocumentProvider):
 
     def _read(self) -> str | None:
         backend = self._backend()
-        try:
-            value = backend.get_password(self._service, self._account)
-        except Exception:  # noqa: BLE001 - keyring backends raise arbitrary types; none are shown
-            raise _unavailable(self.name, "keychain_error") from None
+        ok, value = _call(backend.get_password, self._service, self._account)
+        if not ok:
+            raise _unavailable(self.name, "keychain_error")
         if value is not None and not isinstance(value, str):
             raise _unavailable(self.name, "key_store_corrupt")
         return value
 
     def _write(self, document: str) -> None:
         backend = self._backend()
-        try:
-            backend.set_password(self._service, self._account, document)
-        except Exception:  # noqa: BLE001 - see _read
-            raise _unavailable(self.name, "keychain_error") from None
+        ok, _ = _call(backend.set_password, self._service, self._account, document)
+        if not ok:
+            raise _unavailable(self.name, "keychain_error")
+
+
+def _decode(data: bytes) -> str | None:
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _call(fn: Any, *args: Any) -> tuple[bool, Any]:
+    """Call a keychain backend; report failure without keeping its exception (or its text)."""
+    try:
+        return True, fn(*args)
+    except Exception:  # noqa: BLE001 - keyring backends raise arbitrary types; none are kept
+        return False, None
 
 
 class _Sealed:

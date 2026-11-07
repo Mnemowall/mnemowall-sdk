@@ -20,7 +20,7 @@ from typing import Final
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from mnemowall.core.jcs import MAX_SAFE_INT, canonicalize
+from mnemowall.core.jcs import MAX_SAFE_INT, canonicalize, utf8_ok
 from mnemowall.core.model import EffectiveType, MemoryType
 from mnemowall.core.trust import TrustLevel
 from mnemowall.keys import KeySet, is_key_id
@@ -62,10 +62,6 @@ class SigningError(ValueError):
         self.kind = kind
 
 
-def _safe_name(name: object) -> str:
-    return name if isinstance(name, str) and name.isidentifier() and len(name) <= 64 else "<key>"
-
-
 @dataclass(frozen=True, slots=True)
 class Signature:
     key_id: str
@@ -101,10 +97,8 @@ class VerifyResult:
 def _plain_str(name: str, value: object, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str) or (not value and not allow_empty):
         raise SigningError(name, "wrong_type" if not isinstance(value, str) else "empty")
-    try:
-        value.encode("utf-8")
-    except UnicodeEncodeError:
-        raise SigningError(name, "lone_surrogate") from None
+    if not utf8_ok(value):
+        raise SigningError(name, "lone_surrogate")
     return str.__str__(value)
 
 
@@ -182,7 +176,7 @@ class VersionFields:
         """Build from a stored row; a missing or unexpected field is an error naming it."""
         for key in data:
             if key not in SIGNED_FIELDS:
-                raise SigningError(_safe_name(key), "unexpected")
+                raise SigningError("<unexpected>", "unexpected")  # the key itself may be content
         for name in SIGNED_FIELDS:
             if name not in data:
                 raise SigningError(name, "missing")

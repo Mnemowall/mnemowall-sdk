@@ -119,7 +119,7 @@ def test_ut_sign_001_from_mapping_missing_or_extra_field() -> None:
         assert exc.value.kind == "missing"
     with pytest.raises(SigningError) as exc:
         VersionFields.from_mapping({**good, "created_at": "2026-11-06"})
-    assert exc.value.field == "created_at"
+    assert exc.value.field == "<unexpected>"  # never echo an unknown key: it may be content
     assert exc.value.kind == "unexpected"
 
 

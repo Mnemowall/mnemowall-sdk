@@ -257,7 +257,7 @@ def test_ut_keys_003_keychain_locked_is_unavailable(caplog: pytest.LogCaptureFix
         provider.load()
     assert exc.value.reason == "keychain_error"
     assert exc.value.__cause__ is None
-    assert exc.value.__suppress_context__
+    assert exc.value.__context__ is None  # the backend's exception (and its text) is not kept
     assert diagnostics.counters().get("key_unavailable", 0) >= 1
     records = [r for r in caplog.records if r.getMessage() == "key_unavailable"]
     assert records

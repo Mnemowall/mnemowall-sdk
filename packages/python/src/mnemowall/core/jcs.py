@@ -41,11 +41,22 @@ class JCSError(ValueError):
         self.kind = kind
 
 
-def _string(s: str, path: str) -> str:
+def utf8_ok(s: str) -> bool:
+    """True if ``s`` encodes as UTF-8 (no lone surrogates).
+
+    Errors are raised *after* this returns, never inside an ``except`` block, so the
+    ``UnicodeEncodeError`` (which holds the whole string) is never attached as context (§3.14).
+    """
     try:
         s.encode("utf-8")
     except UnicodeEncodeError:
-        raise JCSError(path, "lone_surrogate") from None
+        return False
+    return True
+
+
+def _string(s: str, path: str) -> str:
+    if not utf8_ok(s):
+        raise JCSError(path, "lone_surrogate")
     return '"' + s.translate(_ESCAPES) + '"'
 
 
