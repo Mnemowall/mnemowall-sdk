@@ -448,10 +448,17 @@ class Quarantine:
         protected: bool = False,
         bundle_id: str,
         provenance: Mapping[str, object],
+        op: str = "write",
     ) -> SubmitResult:
-        """Store a write the engine quarantined. Raises :class:`QuarantineRefused` if it can't."""
+        """Store a write the engine quarantined. Raises :class:`QuarantineRefused` if it can't.
+
+        ``op="delete"`` marks a quarantined deletion: approving it commits a ``deleted`` version
+        (M1b-14, D46), and it can't be promoted.
+        """
         if decision.action is not Outcome.QUARANTINE:
             raise QuarantineError("not_quarantined")
+        if op not in ("write", "delete"):
+            raise QuarantineError("payload_invalid")
         if self._store_aead is None or self._buffer_aead is None:
             diagnostics.record("quarantine_refused")
             _log.error("quarantine_refused", extra={"reason": "keys_unavailable"})
@@ -469,19 +476,20 @@ class Quarantine:
             )
         except (JCSError, TypeError):
             raise QuarantineError("payload_invalid") from None
-        meta = canonicalize(
-            {
-                "trust_level": decision.write_trust.label,
-                "memory_type": decision.memory_type.value,
-                "rule_ids": list(decision.rule_ids),
-                "fired_signals": list(decision.fired_signals),
-                "scope": scope,
-                "protected": bool(protected),
-                "bundle_id": bundle_id,
-                "policy_id": decision.policy_id,
-                "outcome": decision.outcome.value,
-            }
-        ).decode("utf-8")
+        meta_doc: dict[str, object] = {
+            "trust_level": decision.write_trust.label,
+            "memory_type": decision.memory_type.value,
+            "rule_ids": list(decision.rule_ids),
+            "fired_signals": list(decision.fired_signals),
+            "scope": scope,
+            "protected": bool(protected),
+            "bundle_id": bundle_id,
+            "policy_id": decision.policy_id,
+            "outcome": decision.outcome.value,
+        }
+        if op == "delete":
+            meta_doc["op"] = "delete"
+        meta = canonicalize(meta_doc).decode("utf-8")
         item_id = "q-" + uuid.uuid4().hex
         created = self._now_ms()
         expires = created + self._policy.quarantine_ttl_s * 1000
@@ -674,16 +682,17 @@ class Quarantine:
     def _commit(self, item: _Item, effective_type: str, action: str) -> VersionRecord:
         payload = self._payload(item)
         meta = json.loads(item.meta)
+        deletion = meta.get("op") == "delete"
         record = self._ledger.append_version(
             namespace=tuple(payload["namespace"]),
             key=payload["key"],
-            content=payload["content"],
+            content=None if deletion else payload["content"],
             scope=meta["scope"],
             trust_level=meta["trust_level"],  # never raised by review (I8)
             effective_type=effective_type,
             memory_type=meta["memory_type"],
             protected=bool(meta["protected"]),
-            status="active",
+            status="deleted" if deletion else "active",
             bundle_id=meta["bundle_id"],
             provenance={**payload["provenance"], "quarantine_item": item.item_id, "review": action},
         )
@@ -708,6 +717,8 @@ class Quarantine:
         """Request promotion to the item's own type. Returns when it can be completed (ms)."""
         with self._lock:
             item = self._actionable(item_id)
+            if json.loads(item.meta).get("op") == "delete":
+                raise QuarantineError("not_promotable")
             if item.promotion_due_ms is not None:
                 raise QuarantineError("promotion_already_pending")
             due = self._now_ms() + self._delay_ms

@@ -55,6 +55,7 @@ class Driver(Protocol):
     def search(self, query: str) -> list[Read]: ...
     def delete(self, handle: str) -> None: ...
     def rollback(self, memory_id: str, to_version: int) -> RollbackResult: ...
+    def deliver(self) -> dict[str, int]: ...
     def inner_texts(self, principal: str = "alice") -> list[str]: ...
     def raw_plant(self, text: str) -> str: ...
     def raw_copy_to(self, handle: str, principal: str) -> str: ...
@@ -141,6 +142,9 @@ class LangGraphDriver:
     def rollback(self, memory_id: str, to_version: int) -> RollbackResult:
         return self.store.rollback(memory_id, to_version)
 
+    def deliver(self) -> dict[str, int]:
+        return self.store.deliver_reviewed()
+
     def inner_texts(self, principal: str = "alice") -> list[str]:
         return sorted(i.value["text"] for i in self.inner.search(self._ns(principal), limit=1000))
 
@@ -216,6 +220,9 @@ class Mem0Driver:
 
     def rollback(self, memory_id: str, to_version: int) -> RollbackResult:
         return self.mem.rollback(memory_id, to_version)
+
+    def deliver(self) -> dict[str, int]:
+        return self.mem.deliver_reviewed()
 
     def inner_texts(self, principal: str = "alice") -> list[str]:
         found = self.inner.get_all(filters={"user_id": self._uid(principal)}, top_k=1000)

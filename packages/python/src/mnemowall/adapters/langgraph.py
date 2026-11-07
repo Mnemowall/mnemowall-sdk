@@ -56,6 +56,7 @@ from mnemowall.adapters._common import (
     RollbackRefused,
     RollbackResult,
     hash_label,
+    reviewed_heads,
     scope_prefix,
     serialize,
 )
@@ -318,6 +319,7 @@ class GuardedStore(BaseStore):
                     protected=bool(target_protected),
                     bundle_id=decision.policy_id,
                     provenance=provenance,
+                    op="delete" if value is None else "write",
                 )
             except QuarantineRefused as exc:
                 raise MemoryWriteRefused(exc.reason) from None
@@ -426,6 +428,47 @@ class GuardedStore(BaseStore):
         self._ledger.append_event("rollback", event)
         _log.info("rollback", extra={"outcome": outcome, "version_no": to_version})
         return RollbackResult(outcome, memory_id, to_version, new_version)
+
+    # --- review delivery (M1b-14) -------------------------------------------------------
+
+    def deliver_reviewed(self) -> dict[str, int]:
+        """Write approved or promoted quarantine items into the inner store (D45).
+
+        The ledger is the source of truth: for each reviewed item whose ledger head is still
+        that review's commit, the inner store is made to hold exactly that version. Idempotent
+        (an item already holding the head's signature is left alone), and a newer write always
+        wins (``superseded``). Runs without a session, for this store's tenant and scope only.
+        """
+        counts = {"delivered": 0, "already": 0, "superseded": 0, "skipped": 0}
+        base = (ROOT, hash_label("t-", self._tenant_id), self._scope.value)
+        for target in reviewed_heads(self._ledger, self._quarantine, base, counts):
+            ns, key, head = target.namespace, target.key, target.head
+            if any(label.startswith("_") for label in ns[len(base) :]):
+                continue  # another adapter's namespace (LangGraph labels never contain "_")
+            current = cast("Item | None", self._inner.batch([GetOp(ns, key)])[0])
+            ref = current.value.get(REF_KEY) if current is not None else None
+            if head.status != "active" or head.content is None:
+                if current is None:
+                    counts["already"] += 1
+                    continue
+                self._inner.batch([PutOp(ns, key, None)])
+            elif isinstance(ref, Mapping) and ref.get("signature") == head.signature:
+                counts["already"] += 1
+                continue
+            else:
+                value = json.loads(head.content)
+                stored = {
+                    **value,
+                    REF_KEY: {
+                        "memory_id": head.memory_id,
+                        "version_no": head.version_no,
+                        "signature": head.signature,
+                    },
+                }
+                self._inner.batch([PutOp(ns, key, stored)])
+            counts["delivered"] += 1
+            _log.info("review_delivered", extra={"adapter": "langgraph"})
+        return counts
 
     # --- reads -------------------------------------------------------------------------
 

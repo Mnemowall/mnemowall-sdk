@@ -181,6 +181,7 @@ def _review_action(action: str, item_id: str | None, q: Quarantine) -> int:
     elif action == "approve":
         rec = q.approve(item_id)
         print(f"approved as data; memory {rec.memory_id} version {rec.version_no}")
+        print("the store gets it on the adapter's next deliver_reviewed()")
     elif action == "reject":
         q.reject(item_id)
         print("rejected")
