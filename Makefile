@@ -2,7 +2,7 @@
 PY := packages/python
 UV := uv --directory $(PY)
 
-.PHONY: check lint type test secrets audit sbom workflows bench redteam
+.PHONY: check lint type test secrets audit sbom workflows bench redteam demo
 
 check: lint type test secrets workflows
 
@@ -38,3 +38,8 @@ bench:
 redteam:
 	$(UV) run --locked mnemowall redteam
 	-$(UV) run --locked mnemowall redteam --unprotected
+
+# M1a-25: the 8-step scripted demo (docs/demo.md). No network, no keys.
+demo:
+	$(UV) sync --locked --quiet
+	$(UV) run --locked python -m mnemowall.demo
