@@ -280,3 +280,42 @@ def test_can_adapter_errors(caplog: pytest.LogCaptureFixture) -> None:
             assert_clean(lambda: store.rollback(CANARY, 1), caplog)
         with _session(tenant="other"):
             assert_clean(lambda: store.put(("ok",), "k", {"text": CANARY}), caplog)
+
+
+# --- CAN-ADAPTER: Mem0 (M1b-02) ------------------------------------------------------------
+
+
+def test_can_adapter_mem0_errors(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    from mem0_fakes import make_memory
+
+    from mnemowall.adapters.mem0 import GuardedMemory
+
+    led = _ledger(tmp_path)
+    q = Quarantine.open(
+        tmp_path / "q", PROVIDER, ledger=led, policy=load_policy(), tenant_id="tenant-a"
+    )
+    inner = make_memory(tmp_path / "m")
+    mem = GuardedMemory(inner, ledger=led, quarantine=q, tenant_id="tenant-a")
+    with _session():
+        assert_clean(lambda: mem.add(CANARY, metadata={"x": {CANARY}}), caplog)
+        assert_clean(lambda: mem.add(CANARY, metadata={"x": float("nan"), CANARY: 1}), caplog)
+        assert_clean(lambda: mem.add(CANARY, metadata={1: CANARY}), caplog)  # type: ignore[dict-item]
+        assert_clean(lambda: mem.add([{"role": "user", "content": 7, "x": CANARY}]), caplog)
+        assert_clean(lambda: mem.add(CANARY, user_id=CANARY), caplog)
+        assert_clean(lambda: mem.add(CANARY, agent_id=f"{CANARY} x"), caplog)
+        assert_clean(lambda: mem.add(CANARY, infer=True), caplog)
+        assert_clean(lambda: mem.get_all(filters={"OR": [{CANARY: CANARY}]}), caplog)
+        assert_clean(lambda: mem.search(CANARY, filters={CANARY: {"ne": CANARY}}), caplog)
+        assert_clean(lambda: mem.update(CANARY, text=CANARY), caplog)
+        assert_clean(lambda: mem.delete(CANARY), caplog)
+        assert_clean(lambda: mem.rollback(CANARY, 1), caplog)
+
+        def boom(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError(f"backend failed on {CANARY}")
+
+        inner.add = boom
+        assert_clean(lambda: mem.add(CANARY), caplog)
+    with _session(tenant="other"):
+        assert_clean(lambda: mem.add(CANARY), caplog)
+    q.close()
+    led.close()

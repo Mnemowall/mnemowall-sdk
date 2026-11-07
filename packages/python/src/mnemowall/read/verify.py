@@ -56,6 +56,7 @@ class BackendItem:
     created_ms: int | None = None
     relevance: float | None = None
     location: tuple[tuple[str, ...], str] | None = None  # (namespace, key) where it was found
+    text: str | None = field(default=None, repr=False)  # what the model sees; default: content
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +163,7 @@ def read_memories(
     views = [
         MemoryView(
             memory_id=check.memory_id,
-            content=it.content,
+            content=it.content if it.text is None else it.text,
             trust=check.trust,
             verified=check.verified,
             stale=check.stale,

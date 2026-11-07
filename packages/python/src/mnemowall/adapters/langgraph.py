@@ -22,8 +22,6 @@ every store operation goes through (§3.3):
 from __future__ import annotations
 
 import asyncio
-import dataclasses
-import hashlib
 import inspect
 import json
 import unicodedata
@@ -49,6 +47,18 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
     raise ImportError("install the LangGraph extra: pip install 'mnemowall[langgraph]'") from exc
 
 from mnemowall._log import get_logger
+from mnemowall.adapters._common import (
+    ROOT,
+    TRUST_BY_LABEL,
+    MemoryWriteDenied,
+    MemoryWriteRefused,
+    ProbeResult,
+    RollbackRefused,
+    RollbackResult,
+    hash_label,
+    scope_prefix,
+    serialize,
+)
 from mnemowall.core import diagnostics
 from mnemowall.core.forgery import strip_returned
 from mnemowall.core.model import MemoryType, Outcome
@@ -61,14 +71,14 @@ from mnemowall.read import BackendItem, MemoryRef, read_memories
 from mnemowall.signals.write import Op as WriteOp
 from mnemowall.signals.write import Scope, ScopeKind
 
-ROOT: Final = "mnemowall"
 REF_KEY: Final = "_mnemowall_ref"
 LABEL_KEY: Final = "mnemowall"
 _FORBIDDEN_CHARS: Final = frozenset(".%_")
 _BAD_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
 _log = get_logger("langgraph")
-_TRUST_BY_LABEL: Final = {t.label: t for t in TrustLevel}
+_TRUST_BY_LABEL: Final = TRUST_BY_LABEL
+_hash_label = hash_label
 
 
 class NamespaceError(InvalidNamespaceError):
@@ -77,44 +87,6 @@ class NamespaceError(InvalidNamespaceError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
-
-
-class MemoryWriteDenied(PermissionError):
-    """The policy denied the operation (for example I5 cross-scope, or a tenant mismatch)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
-class RollbackRefused(RuntimeError):
-    """A rollback target can't be restored (I7): unknown, unverified, purged or out of scope."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
-@dataclasses.dataclass(frozen=True)
-class RollbackResult:
-    outcome: str  # committed | quarantined | deleted
-    memory_id: str
-    to_version: int
-    new_version: int | None
-
-
-class MemoryWriteRefused(RuntimeError):
-    """The write couldn't be made safely (probe failure, quarantine full or unavailable)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
-@dataclasses.dataclass(frozen=True)
-class ProbeResult:
-    ok: bool
-    reasons: tuple[str, ...]
 
 
 def _one_param(fn: Any) -> bool:
@@ -141,10 +113,6 @@ def probe(inner: object) -> ProbeResult:
     return ProbeResult(not reasons, tuple(reasons))
 
 
-def _hash_label(prefix: str, value: str) -> str:
-    return prefix + hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()[:16]
-
-
 def _check_label(label: object, *, allow_wildcard: bool = False) -> str:
     if not isinstance(label, str) or not label:
         raise NamespaceError("invalid_label")
@@ -165,13 +133,6 @@ def _check_list_args(kwargs: Mapping[str, Any]) -> None:
     for name in ("prefix", "suffix"):
         if kwargs.get(name) is not None:
             _check_namespace(tuple(kwargs[name]), allow_wildcard=True)
-
-
-def serialize(value: Mapping[str, Any]) -> str:
-    """The signed content of a stored value (D26)."""
-    return json.dumps(
-        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-    )
 
 
 class GuardedStore(BaseStore):
@@ -216,10 +177,7 @@ class GuardedStore(BaseStore):
             _log.error("tenant_mismatch", extra={"adapter": "langgraph"})
             raise MemoryWriteDenied("tenant_mismatch")
         principal = session.principal if session is not None else "anonymous"
-        prefix: tuple[str, ...] = (ROOT, _hash_label("t-", self._tenant_id), self._scope.value)
-        if self._scope is ScopeKind.USER:
-            prefix += (_hash_label("p-", principal),)
-        return session, prefix
+        return session, scope_prefix(self._tenant_id, self._scope, principal)
 
     # --- pre-validation ----------------------------------------------------------------
     # BaseStore.put / list_namespaces validate labels themselves *before* calling batch, and
@@ -632,3 +590,20 @@ class MnemowallCallbackHandler(BaseCallbackHandler):
         ref = getattr(output, "tool_call_id", None)
         text = content if isinstance(content, str) else json.dumps(content, default=str)
         session.observe(text, source=self._source, ref=ref if isinstance(ref, str) else None)
+
+
+__all__ = [
+    "LABEL_KEY",
+    "REF_KEY",
+    "ROOT",
+    "GuardedStore",
+    "MemoryWriteDenied",
+    "MemoryWriteRefused",
+    "MnemowallCallbackHandler",
+    "NamespaceError",
+    "ProbeResult",
+    "RollbackRefused",
+    "RollbackResult",
+    "probe",
+    "serialize",
+]

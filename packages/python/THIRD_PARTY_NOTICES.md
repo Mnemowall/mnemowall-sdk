@@ -19,3 +19,12 @@ Dual-licensed under the Apache License 2.0 or the BSD 3-Clause License
 ## keyring (optional)
 Installed only with the `keychain` extra (`mnemowall[keychain]`). Licensed under the MIT License
 (https://github.com/jaraco/keyring).
+
+## langgraph, langgraph-checkpoint (optional)
+Installed only with the `langgraph` extra (`mnemowall[langgraph]`). Licensed under the MIT License
+(https://github.com/langchain-ai/langgraph).
+
+## mem0ai (optional)
+Installed only with the `mem0` extra (`mnemowall[mem0]`). Licensed under the Apache License 2.0
+(https://github.com/mem0ai/mem0). It brings in `qdrant-client` (Apache-2.0), `openai`, `posthog`
+and `sqlalchemy` as its own dependencies.

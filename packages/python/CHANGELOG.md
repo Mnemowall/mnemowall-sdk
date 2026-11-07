@@ -23,5 +23,12 @@ First usable release (alpha).
   - verify on read (`unverified`/`stale`), per-read boundary wrapping, never drop;
   - location binding: a signed item copied to another key, namespace or principal reads `unverified` (`location_mismatch`).
 - **LangGraph adapter:** `GuardedStore` with namespace isolation, a capability probe, and rollback through policy.
+- **Mem0 OSS adapter** (`mnemowall[mem0]`, strict mode):
+  - `GuardedMemory`/`GuardedAsyncMemory` with a derived `user_id`;
+  - ownership checks on id-based calls;
+  - plain-equality filters;
+  - wrapped `memory` on read;
+  - rollback through policy.
+- **Shared adapter contract suite:** the same tests run against LangGraph and Mem0.
 - **CLI:** `keys`, `review`, `incident`, `export`, `verify-ledger`, `doctor`, `redteam`.
 - **Red-team pack v0** (T1a, T1d, T5, T6, T8, T10), `make bench` and `make demo`.

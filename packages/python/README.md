@@ -15,6 +15,7 @@ Wrapping and detection *reduce* risk; they are not guarantees. See "Limits" belo
 
 ```sh
 pip install 'mnemowall[langgraph]'      # LangGraph adapter
+pip install 'mnemowall[mem0]'           # Mem0 OSS adapter (strict mode)
 pip install 'mnemowall[keychain]'       # optional: keys in the OS keychain
 mnemowall keys init
 ```
@@ -52,6 +53,32 @@ with guard.session(tenant="acme", principal="alice", agent="assistant", session_
 
 `@mnemowall.source("email")` marks tool functions whose results are third-party input. `MnemowallCallbackHandler` does the same for LangChain tool outputs.
 
+## Use with Mem0 (OSS)
+
+```python
+import os
+
+os.environ["MEM0_TELEMETRY"] = "False"  # before importing mem0: its telemetry is on by default
+
+from mem0 import Memory
+from mnemowall.adapters.mem0 import GuardedMemory
+
+memory = GuardedMemory(Memory(config), ledger=ledger, quarantine=quarantine, tenant_id="acme")
+
+with guard.session(tenant="acme", principal="alice", agent="assistant", session_id="s-2") as s:
+    s.system_prompt()
+    s.user_turn()
+    memory.add("I prefer green tea.")  # each message goes through policy, then Mem0
+    hits = memory.search("tea")["results"]
+    prompt_text = "\n".join(h["memory"] for h in hits)  # already wrapped where policy says so
+```
+
+- **Strict mode is the default.** Messages are stored verbatim (`infer=False`), so the text policy checks is the text that's stored. `add(..., infer=True)` is refused unless you opt into infer mode, which is a detective beta.
+- **Scope comes from the session.** The wrapper sets Mem0's `user_id` itself from tenant, scope and principal. `get`/`update`/`delete` on another user's id behave as "not found". `filters` accept plain equality only.
+- **`memory` in results is the model-facing text.** Anything below the policy's wrap threshold (by default, everything not from a verified user turn) comes back between per-read `mnemowall-item` markers. The stored text is in `result["mnemowall"]["raw"]`. When you use wrapped text, put `mnemowall.read.PREAMBLE` in the system prompt.
+- `reset()` and `history()` are not exposed. The ledger is the history (`mnemowall incident`, `export`).
+- Mem0 logs memory text at INFO/DEBUG. Keep the `mem0` logger at WARNING or above.
+
 ## CLI
 
 | Command | What it does |
@@ -69,7 +96,8 @@ Try everything at once, with no network and no keys: `make demo` in the reposito
 ## Limits (read these)
 
 - **In-process signing key.** An agent that can execute code in the SDK's process can read the signing key (see SECURITY.md). A separate signer is planned.
-- **Code that bypasses the wrapper.** Wrapping protects prompts only if you use `value["mnemowall"]["text"]`; code that reads fields directly bypasses it. Reads through the raw inner store bypass Mnemowall entirely.
+- **Code that bypasses the wrapper.** With LangGraph, wrapping protects prompts only if you use `value["mnemowall"]["text"]`; code that reads fields directly bypasses it. Reads through the raw inner store or the raw Mem0 object bypass Mnemowall entirely.
+- **Same-scope copies in Mem0.** A Mem0 item copied byte for byte by someone with direct backend access, inside the *same* user's scope, reads as a verified duplicate of a genuine memory. A copy into another user, agent or run scope reads `unverified`.
 - **Detection is lexical in 0.1.** Fact-shaped poisoning without sinks or obfuscation is stored as wrapped data, not blocked.
 - **Small red-team corpus.** Red-team rates come from a small v0 corpus and are not publishable catch rates.
 
