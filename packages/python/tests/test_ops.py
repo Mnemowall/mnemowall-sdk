@@ -273,3 +273,30 @@ def test_ut_doctor_004_cli(setup: dict[str, Any], capsys: pytest.CaptureFixture[
     con.close()
     assert cli.main(["doctor", *setup["args"]]) == 2
     assert "ledger_tampered" in capsys.readouterr().out
+
+
+def test_ut_doctor_005_mem0_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """M1b-02: doctor covers Mem0 wrappers: probe failure, telemetry on, backend errors."""
+    import mem0.memory.telemetry as telemetry
+    from mem0_fakes import make_memory
+
+    from mnemowall.adapters.mem0 import GuardedMemory
+
+    provider = EphemeralKeyProvider()
+    provider.init()
+    led = Ledger.open(tmp_path / "l.db", provider, tenant_id="t")
+    q = Quarantine.open(tmp_path / "q", provider, ledger=led, policy=load_policy(), tenant_id="t")
+    good = GuardedMemory(make_memory(tmp_path / "m"), ledger=led, quarantine=q, tenant_id="t")
+    bad = GuardedMemory(object(), ledger=led, quarantine=q, tenant_id="t")
+    found = {f.code: f.severity for f in run_checks(stores=[good], counters={})}
+    assert "adapter_probe_failure" not in found
+    assert "unwrapped_store" not in found
+    found = {f.code: f.severity for f in run_checks(stores=[bad], counters={})}
+    assert found["adapter_probe_failure"] == "error"
+    monkeypatch.setattr(telemetry, "MEM0_TELEMETRY", True)
+    found = {f.code: f.severity for f in run_checks(stores=[good], counters={})}
+    assert found["mem0_telemetry_enabled"] == "warning"
+    counted = {f.code for f in run_checks(counters={"backend_error": 2, "principal_mismatch": 1})}
+    assert {"backend_error", "principal_mismatch"} <= counted
+    q.close()
+    led.close()

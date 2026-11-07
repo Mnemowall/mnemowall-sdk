@@ -996,3 +996,25 @@ def test_can_ledger_at_rest(tmp_path: Path) -> None:
     with path.open("ab") as fh:
         fh.write(CANARY.encode("utf-16-le"))
     assert scan([path]) == [f"ledger.db:{CANARY}"]
+
+
+def test_ut_ledger_provenance_record(tmp_path: Path) -> None:
+    """M1b-02: the decrypted provenance of a verified version, checked against its signed hash."""
+    led = open_ledger(tmp_path / "ledger.db")
+    rec = led.append_version(
+        namespace=("u",),
+        key="k",
+        content="x",
+        scope="user",
+        trust_level="user",
+        effective_type="fact",
+        memory_type="fact",
+        bundle_id="b",
+        provenance={"backend": "mem0", "agent_id": "travel"},
+    )
+    assert led.provenance(rec.memory_id, 1) == {"backend": "mem0", "agent_id": "travel"}
+    assert led.provenance(rec.memory_id, 2) is None
+    assert led.provenance("nope", 1) is None
+    with sqlite3.connect(tmp_path / "ledger.db") as con:
+        con.execute("UPDATE blobs SET ct = ? WHERE col = 'provenance'", (b"\x00" * 40,))
+    assert led.provenance(rec.memory_id, 1) is None

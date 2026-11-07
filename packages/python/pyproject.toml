@@ -33,6 +33,8 @@ dependencies = [
 keychain = ["keyring==25.7.0"]
 # ADR-0022: LangGraph BaseStore adapter (§3.3 pins, re-verified 2026-11-06).
 langgraph = ["langgraph==1.2.19", "langgraph-checkpoint==4.3.1"]
+# ADR-0025: Mem0 OSS adapter, strict mode by default (§3.3 Mem0 row; pin re-verified 2026-11-07).
+mem0 = ["mem0ai==2.2.1"]
 
 [project.scripts]
 mnemowall = "mnemowall.cli:main"
@@ -58,6 +60,7 @@ dev = [
   "rfc8785==0.1.4",  # ADR-0020 (D12): reference JCS for differential tests only
   "langgraph==1.2.19",  # ADR-0022: adapter and contract tests run in CI
   "langgraph-checkpoint==4.3.1",
+  "mem0ai==2.2.1",  # ADR-0025: Mem0 adapter and contract tests (keyless, in-process Qdrant)
 ]
 
 [tool.uv]
@@ -94,6 +97,10 @@ ignore_missing_imports = true  # google-re2 ships no type stubs; wrapped in mnem
 [[tool.mypy.overrides]]
 module = ["keyring", "keyring.*"]
 ignore_missing_imports = true  # optional extra (D13); not installed in CI, imported lazily
+
+[[tool.mypy.overrides]]
+module = ["mem0", "mem0.*", "qdrant_client", "qdrant_client.*"]
+ignore_missing_imports = true  # mem0ai ships no py.typed marker; the adapter types its own boundary
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --strict-config"

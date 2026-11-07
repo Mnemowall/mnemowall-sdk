@@ -803,6 +803,23 @@ class Ledger:
             )
             return None if row is None else self._record(row)
 
+    def provenance(self, memory_id: str, version_no: int) -> dict[str, object] | None:
+        """The provenance record of a verified version, checked against its signed hash."""
+        with self._lock:
+            row = self._row(
+                "kind = 'version' AND memory_id = ? AND version_no = ?", (memory_id, version_no)
+            )
+            if row is None:
+                return None
+            record = self._record(row)
+            if not record.verified or record.signed_fields is None:
+                return None
+            raw = self._decrypt(row.seq, "provenance")
+            if raw is None or self._hmac(_PROVENANCE_DOMAIN, raw) != record.fields.provenance_hash:
+                return None
+            doc = json.loads(raw)
+            return dict(doc) if isinstance(doc, dict) else None
+
     def versions(self, memory_id: str) -> list[VersionRecord]:
         with self._lock:
             found = self._con.execute(

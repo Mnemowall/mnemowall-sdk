@@ -36,6 +36,21 @@ _COUNTER_FINDINGS: Final = {
         "reads returned unverified items (raw inserts, tampering or missing keys)",
     ),
     "read_stale": ("warning", "read_stale", "reads returned stale items (possible replay)"),
+    "backend_error": (
+        "warning",
+        "backend_error",
+        "the memory backend failed during a write; nothing from its error was passed on",
+    ),
+    "principal_mismatch": (
+        "warning",
+        "principal_mismatch",
+        "a caller passed a user id that differs from the session principal (denied)",
+    ),
+    "mem0_telemetry_enabled": (
+        "warning",
+        "mem0_telemetry_enabled",
+        "Mem0 telemetry was on when a wrapper was built; set MEM0_TELEMETRY=False",
+    ),
     "tenant_mismatch": (
         "warning",
         "tenant_mismatch",
@@ -172,16 +187,28 @@ def run_checks(
                 Finding(
                     "warning",
                     "unwrapped_store",
-                    f"{type(store).__name__} is not wrapped by GuardedStore",
+                    f"{type(store).__name__} is not wrapped by a Mnemowall adapter",
                 )
             )
         elif not probe_result.ok:
+            inner = getattr(store, "_inner", None)
+            if inner is None:
+                inner = getattr(getattr(store, "_core", None), "_inner", None)
             add(
                 Finding(
                     "error",
                     "adapter_probe_failure",
-                    f"GuardedStore over {type(store._inner).__name__}: interception not"
+                    f"{type(store).__name__} over {type(inner).__name__}: interception not"
                     f" guaranteed ({', '.join(probe_result.reasons)}); writes refused",
+                )
+            )
+        if type(store).__module__ == "mnemowall.adapters.mem0" and _mem0_telemetry_on():
+            add(
+                Finding(
+                    "warning",
+                    "mem0_telemetry_enabled",
+                    "Mem0 telemetry is on (memory ids go to PostHog); set MEM0_TELEMETRY=False"
+                    " before importing mem0",
                 )
             )
     counts = diagnostics.counters() if counters is None else dict(counters)
@@ -190,6 +217,12 @@ def run_checks(
         if n:
             add(Finding(severity, code, f"{message} (x{n})"))
     return out
+
+
+def _mem0_telemetry_on() -> bool:
+    from mnemowall.adapters.mem0 import telemetry_enabled
+
+    return telemetry_enabled()
 
 
 def exit_code(findings: Iterable[Finding]) -> int:
