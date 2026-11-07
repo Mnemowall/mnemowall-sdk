@@ -35,6 +35,8 @@ keychain = ["keyring==25.7.0"]
 langgraph = ["langgraph==1.2.19", "langgraph-checkpoint==4.3.1"]
 # ADR-0025: Mem0 OSS adapter, strict mode by default (§3.3 Mem0 row; pin re-verified 2026-11-07).
 mem0 = ["mem0ai==2.2.1"]
+# ADR-0026: YAML policy files (safe_load only). JSON policy files need no extra.
+yaml = ["PyYAML==6.0.3"]
 
 [project.scripts]
 mnemowall = "mnemowall.cli:main"
@@ -61,6 +63,7 @@ dev = [
   "langgraph==1.2.19",  # ADR-0022: adapter and contract tests run in CI
   "langgraph-checkpoint==4.3.1",
   "mem0ai==2.2.1",  # ADR-0025: Mem0 adapter and contract tests (keyless, in-process Qdrant)
+  "PyYAML==6.0.3",  # ADR-0026: signed YAML policy tests
 ]
 
 [tool.uv]
@@ -99,7 +102,7 @@ module = ["keyring", "keyring.*"]
 ignore_missing_imports = true  # optional extra (D13); not installed in CI, imported lazily
 
 [[tool.mypy.overrides]]
-module = ["mem0", "mem0.*", "qdrant_client", "qdrant_client.*"]
+module = ["mem0", "mem0.*", "qdrant_client", "qdrant_client.*", "yaml"]
 ignore_missing_imports = true  # mem0ai ships no py.typed marker; the adapter types its own boundary
 
 [tool.pytest.ini_options]

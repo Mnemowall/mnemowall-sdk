@@ -16,6 +16,7 @@ Wrapping and detection *reduce* risk; they are not guarantees. See "Limits" belo
 ```sh
 pip install 'mnemowall[langgraph]'      # LangGraph adapter
 pip install 'mnemowall[mem0]'           # Mem0 OSS adapter (strict mode)
+pip install 'mnemowall[yaml]'           # optional: YAML policy files
 pip install 'mnemowall[keychain]'       # optional: keys in the OS keychain
 mnemowall keys init
 ```
@@ -79,11 +80,32 @@ with guard.session(tenant="acme", principal="alice", agent="assistant", session_
 - `reset()` and `history()` are not exposed. The ledger is the history (`mnemowall incident`, `export`).
 - Mem0 logs memory text at INFO/DEBUG. Keep the `mem0` logger at WARNING or above.
 
+## Local policies (signed)
+
+The built-in strict policy needs no file. To use your own, sign it with a key that never lives on the machine running the agent, and give the app only the public key:
+
+```sh
+mnemowall policy keygen --out ~/secure/policy.key   # prints "trusted key: ed25519:..."
+mnemowall policy sign policy.yaml --key ~/secure/policy.key   # writes policy.yaml.sig
+mnemowall policy verify policy.yaml --trusted-key ed25519:...
+```
+
+```python
+from mnemowall.policyfile import load_policy_file
+
+policy = load_policy_file("policy.yaml", trusted_keys=["ed25519:..."])
+```
+
+- **Fail closed.** An unsigned, edited or wrong-key policy is never used: you get the built-in strict default and a `doctor` error.
+- **Weakening waits 24 h.** A policy that is weaker than the default only takes effect 24 hours after signing. Weaker means a removed or softened rule, shadow mode, lower read wrapping, a looser failure mode, or a longer quarantine TTL.
+- **Formats.** YAML needs `pip install 'mnemowall[yaml]'` and is read with `safe_load` only. JSON needs nothing extra.
+
 ## CLI
 
 | Command | What it does |
 |---|---|
 | `mnemowall keys init / rotate / status` | Signing and storage keys (keychain or a 0600 file) |
+| `mnemowall policy keygen / sign / verify` | Create a policy-signing key, sign a policy file, check a signed one |
 | `mnemowall review list / show / approve / reject / promote / cancel / complete` | Review quarantined writes. Approval commits them as data, at their original trust; promotion to an instruction waits at least 24 h. Your app calls `store.deliver_reviewed()` / `memory.deliver_reviewed()` to write approved items into the memory store (idempotent; a newer write always wins) |
 | `mnemowall incident MEMORY_ID VERSION` | Every session that read a version |
 | `mnemowall export --jsonl --out FILE` | Content-free, tamper-evident evidence |

@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform != 'emscripten'",
     "python_full_version < '3.12'",
 ]
@@ -1515,6 +1515,9 @@ langgraph = [
 mem0 = [
     { name = "mem0ai" },
 ]
+yaml = [
+    { name = "pyyaml" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1527,6 +1530,7 @@ dev = [
     { name = "mypy" },
     { name = "pip-audit" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "rfc8785" },
     { name = "ruff" },
 ]
@@ -1539,8 +1543,9 @@ requires-dist = [
     { name = "langgraph", marker = "extra == 'langgraph'", specifier = "==1.2.19" },
     { name = "langgraph-checkpoint", marker = "extra == 'langgraph'", specifier = "==4.3.1" },
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = "==2.2.1" },
+    { name = "pyyaml", marker = "extra == 'yaml'", specifier = "==6.0.3" },
 ]
-provides-extras = ["keychain", "langgraph", "mem0"]
+provides-extras = ["keychain", "langgraph", "mem0", "yaml"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1553,6 +1558,7 @@ dev = [
     { name = "mypy", specifier = "==2.4.1" },
     { name = "pip-audit", specifier = "==2.10.1" },
     { name = "pytest", specifier = "==9.2.0" },
+    { name = "pyyaml", specifier = "==6.0.3" },
     { name = "rfc8785", specifier = "==0.1.4" },
     { name = "ruff", specifier = "==0.17.3" },
 ]
@@ -1775,10 +1781,10 @@ version = "2.5.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.12.*' and sys_platform != 'emscripten'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz", hash = "sha256:9a94cf751c9ad8ebaa835bcd3d40dacf8534ad086b88c38029b65123c7999d2a", size = 20866315, upload-time = "2026-10-10T20:05:31.422Z" }

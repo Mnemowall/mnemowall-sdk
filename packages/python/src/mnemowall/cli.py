@@ -5,6 +5,7 @@
 * ``incident MEMORY_ID VERSION`` (M1a-20)
 * ``export --jsonl``, ``verify-ledger``, ``doctor`` (M1a-21)
 * ``redteam [--unprotected]`` (M1a-23)
+* ``policy keygen|sign|verify`` (M1b-06): locally signed policy files
 
 Output never includes key material. ``review list`` shows no content; ``review show`` prints
 content through :func:`mnemowall.core.render.render_untrusted`, so terminal escapes, bidi
@@ -20,6 +21,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from mnemowall.core.files import PrivatePathError, private_dir
 from mnemowall.core.render import render_untrusted
@@ -105,6 +107,18 @@ def _parser() -> argparse.ArgumentParser:
         "redteam", help="run the red-team poisoning pack (needs the langgraph extra)"
     )
     rt.add_argument("--unprotected", action="store_true", help="run against a plain store")
+    pol = sub.add_parser("policy", help="sign and verify local policy files")
+    pol_actions = pol.add_subparsers(dest="action", required=True)
+    kg = pol_actions.add_parser("keygen", help="create a policy-signing key (keep it off servers)")
+    kg.add_argument("--out", type=Path, required=True, help="where to write the private key")
+    sg = pol_actions.add_parser("sign", help="sign a policy file (writes FILE.sig)")
+    sg.add_argument("file", type=Path)
+    sg.add_argument("--key", type=Path, required=True, help="the policy-signing key")
+    vf = pol_actions.add_parser("verify", help="check a signed policy file")
+    vf.add_argument("file", type=Path)
+    vf.add_argument(
+        "--trusted-key", action="append", required=True, help="a pinned public key (repeatable)"
+    )
     return parser
 
 
@@ -284,6 +298,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "redteam":
         return _redteam(args)
+    if args.command == "policy":
+        return _policy(args)
     provider = _provider(args, parser)
     if args.command == "keys":
         return _keys(args, provider)
@@ -296,6 +312,51 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "doctor":
         return _doctor(args, provider)
     return _review(args, provider)
+
+
+def _policy(args: argparse.Namespace) -> int:
+    from mnemowall.policyfile import (
+        DELAY_S,
+        PolicySignError,
+        keygen,
+        sign_policy,
+        verify_policy,
+    )
+
+    try:
+        if args.action == "keygen":
+            pub = keygen(args.out)
+            print("policy-signing key written; pin this public key in your app's config:")
+            print(f"trusted key: {pub}")
+            return 0
+        if args.action == "sign":
+            sig = sign_policy(args.file, args.key)
+            doc = _read_json(sig)
+            print(f"signed: {sig.name}")
+            if int(doc["not_before"]) - int(doc["signed_at"]) >= DELAY_S:
+                print(
+                    "this policy is weaker than the built-in default:"
+                    " it takes effect 24 h after signing"
+                )
+            return 0
+        check = verify_policy(args.file, args.trusted_key)
+    except PolicySignError as exc:
+        print(f"error: {exc.reason}", file=sys.stderr)
+        return 2
+    except ValueError:
+        print("error: invalid_trusted_key", file=sys.stderr)
+        return 2
+    print(f"{check.reason}" + (f" (key {check.key_id})" if check.key_id else ""))
+    for item in check.loosenings:
+        print(f"  weaker than default: {item}")
+    return 0 if check.ok else 1
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    import json
+
+    doc = json.loads(path.read_text())
+    return doc if isinstance(doc, dict) else {}
 
 
 def _redteam(args: argparse.Namespace) -> int:
