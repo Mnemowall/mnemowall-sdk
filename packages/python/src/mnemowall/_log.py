@@ -121,3 +121,8 @@ def get_logger(component: str) -> logging.Logger:
     if _FILTER not in logger.filters:
         logger.addFilter(_FILTER)
     return logger
+
+
+def library_log_level(name: str) -> int:
+    """Effective level of another library's logger (read only; used by ``doctor``)."""
+    return logging.getLogger(name).getEffectiveLevel()

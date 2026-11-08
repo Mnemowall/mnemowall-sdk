@@ -251,4 +251,27 @@ class Mem0Driver:
         self.ledger.close()
 
 
-DRIVERS = {"langgraph": LangGraphDriver, "mem0": Mem0Driver}
+class Mem0InferDriver(Mem0Driver):
+    """Mem0 infer mode (beta, D40): writes go through Mem0's own extraction; the scripted model
+    "extracts" exactly the text, so the shared expectations apply after reconciliation."""
+
+    name = "mem0-infer"
+
+    def __init__(self, tmp: Path) -> None:
+        self.ledger, self.quarantine = _open(tmp)
+        self.inner = make_memory(tmp / "mem0")
+        self.mem = GuardedMemory(
+            self.inner,
+            ledger=self.ledger,
+            quarantine=self.quarantine,
+            tenant_id=TENANT,
+            mode="infer",
+        )
+
+    def put(self, text: str) -> str | None:
+        self.inner.llm.script.append([text])
+        (res,) = self.mem.add(f"message: {text}", infer=True)["results"]
+        return res["id"]  # type: ignore[no-any-return]
+
+
+DRIVERS = {"langgraph": LangGraphDriver, "mem0": Mem0Driver, "mem0-infer": Mem0InferDriver}

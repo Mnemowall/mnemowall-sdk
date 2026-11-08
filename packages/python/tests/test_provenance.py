@@ -18,6 +18,7 @@ from mnemowall.core.provenance import (
     SessionError,
     UnknownContextItemError,
     current_write_trust,
+    trust_cap,
 )
 from mnemowall.core.trust import Source, TrustLevel, is_tainted, trust_min
 
@@ -161,6 +162,49 @@ def test_ut_prov_011_unknown_ids_raise_and_change_nothing() -> None:
         with pytest.raises(UnknownContextItemError):
             s.compacted(["nope"])
         assert s.write_trust() is T.WEB
+
+
+def test_ut_prov_cap_001_trust_cap_only_lowers() -> None:
+    """``trust_cap`` (D54) lowers write trust inside a block; it can never raise it (I9)."""
+    guard = Guard()
+    with _session(guard, "cap") as s:
+        s.user_turn()
+        assert current_write_trust() is T.USER
+        with trust_cap(T.EMAIL):
+            assert current_write_trust() is T.EMAIL
+            with trust_cap(T.OPERATOR):  # a higher cap inside a lower one changes nothing
+                assert current_write_trust() is T.EMAIL
+            with trust_cap(T.UNKNOWN):
+                assert current_write_trust() is T.UNKNOWN
+            assert current_write_trust() is T.EMAIL
+        with trust_cap(T.OPERATOR):
+            assert current_write_trust() is T.USER
+        assert current_write_trust() is T.USER
+        assert s.write_trust() is T.USER  # the session itself is not tainted by a cap
+    with trust_cap(T.USER):
+        assert current_write_trust() is T.UNKNOWN  # no session stays unknown
+
+
+def test_ut_prov_cap_002_cap_is_context_local() -> None:
+    guard = Guard()
+
+    async def capped() -> TrustLevel:
+        with _session(guard, "c1") as s, trust_cap(T.WEB):
+            s.user_turn()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            return current_write_trust()
+
+    async def plain() -> TrustLevel:
+        with _session(guard, "c2") as s:
+            s.user_turn()
+            await asyncio.sleep(0)
+            return current_write_trust()
+
+    async def both() -> list[TrustLevel]:
+        return list(await asyncio.gather(capped(), plain()))
+
+    assert asyncio.run(both()) == [T.WEB, T.USER]
 
 
 def test_ut_prov_012_isolation_nesting_and_tasks() -> None:

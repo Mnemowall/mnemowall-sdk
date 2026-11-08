@@ -76,8 +76,47 @@ def _config(tmp: Path) -> MemoryConfig:
     )
 
 
-def make_memory(tmp: Path) -> Memory:
-    m = Memory(_config(tmp))
+class EventMemory(Memory):  # type: ignore[misc]  # mem0 is untyped
+    """A Mem0 whose infer ``add`` runs a scripted action instead: it simulates versions that emit
+    ``UPDATE``/``DELETE`` events, or a store that writes and then fails (V2)."""
+
+    action: Callable[[Memory], Any] | None = None
+    active = 0
+    max_active = 0
+
+    def add(
+        self,
+        messages: Any,
+        *,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        infer: bool = True,
+        memory_type: str | None = None,
+        prompt: str | None = None,
+    ) -> Any:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            if infer and self.action is not None:
+                return self.action(self)
+            return super().add(
+                messages,
+                user_id=user_id,
+                agent_id=agent_id,
+                run_id=run_id,
+                metadata=metadata,
+                infer=infer,
+                memory_type=memory_type,
+                prompt=prompt,
+            )
+        finally:
+            self.active -= 1
+
+
+def make_memory(tmp: Path, cls: type[Memory] = Memory) -> Memory:
+    m = cls(_config(tmp))
     m.embedding_model = HashEmbedder()
     m.llm = ScriptedLLM()
     return m

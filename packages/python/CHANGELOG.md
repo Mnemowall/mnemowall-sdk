@@ -29,7 +29,12 @@ First usable release (alpha).
   - plain-equality filters;
   - wrapped `memory` on read;
   - rollback through policy.
-- **Shared adapter contract suite:** the same tests run against LangGraph and Mem0.
+- **Mem0 infer mode (beta, detective; `mode="infer"`):**
+  - Mem0 extracts and stores; Mnemowall diffs the scope under a per-user lock, signs what policy commits, removes and quarantines the rest, and restores protected memories Mem0 changed or deleted;
+  - trust is capped at what Mem0's model could have seen: memories in scope and the last 10 infer calls' messages (signed `infer` ledger events);
+  - `provenance.trust_cap()` (lowers write trust only);
+  - `doctor`: `infer_removed`, `infer_restored`, and `mem0_logs_content` when the `mem0` logger is below CRITICAL.
+- **Shared adapter contract suite:** the same tests run against LangGraph, Mem0 strict and Mem0 infer mode.
 - **Signed local policies:**
   - `mnemowall policy keygen/sign/verify` and `load_policy_file`;
   - a separate signing key, with only the public key pinned in the app;

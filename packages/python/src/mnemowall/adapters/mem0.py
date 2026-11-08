@@ -11,18 +11,22 @@ nothing else of the inner object is reachable through the wrapper.
   verbatim (``infer=False``), so the text policy sees is exactly the text stored. Every message
   goes through the policy engine with trust from the provenance context only (I9); Mem0's
   ``role`` and ``name`` are never read as trust.
-* **Infer mode (beta, detective; ``mode="infer"``).** Mem0's LLM extracts and stores first; each
-  result is then checked, and anything policy would not commit is removed and quarantined
-  (D40). Between those two steps the extracted text sits in Mem0 without a reference, so any
-  read in that window shows it ``unverified``.
+* **Infer mode (beta, detective; ``mode="infer"``).** Mem0's LLM extracts and stores first. Under
+  a per-user lock the wrapper diffs the scope before and after (D53), checks every new or changed
+  item against policy at a trust floor (D54), removes what policy would not commit (quarantining
+  it where policy says so) and restores protected memories that Mem0 changed or deleted (D40).
+  Between Mem0's write and the check the extracted text sits in Mem0 without a reference, so
+  any read in that window shows it ``unverified``.
 * **Scope.** The Mem0 ``user_id`` is derived from tenant, scope and session principal (D35);
   id-based calls check ownership themselves, because Mem0's ``get``/``update``/``delete`` don't
   (V3). Filters are plain equality only (D39).
 * **Reads** are verified against the ledger, located (D32), logged, registered, and returned
   with ``memory`` replaced by the model-facing text and ``mnemowall`` labels added (D38).
 
-Honest limits: Mem0 itself logs memory text at INFO/DEBUG (keep the ``mem0`` logger at WARNING),
-and its telemetry is on unless ``MEM0_TELEMETRY=False`` is set before import (V5, V6).
+Honest limits: Mem0 itself logs memory text at INFO/DEBUG and quotes it in ERROR logs (set the
+``mem0`` logger to CRITICAL), and its telemetry is on unless ``MEM0_TELEMETRY=False`` is set before
+import (V5, V6, V9). In infer mode Mem0 also keeps the raw input messages in its own history
+database (V8), which Mnemowall does not manage.
 """
 
 from __future__ import annotations
@@ -63,13 +67,18 @@ from mnemowall.adapters._common import (
 from mnemowall.core import diagnostics
 from mnemowall.core.forgery import ForgeryError, is_reserved_key, strip_returned, strip_value
 from mnemowall.core.model import MemoryType, Outcome
-from mnemowall.core.provenance import ProvenanceSession, current_session
-from mnemowall.core.trust import TrustLevel
+from mnemowall.core.provenance import (
+    ProvenanceSession,
+    current_session,
+    current_write_trust,
+    trust_cap,
+)
+from mnemowall.core.trust import TrustLevel, trust_min
 from mnemowall.ledger import Ledger, VersionRecord
 from mnemowall.policy import CompiledPolicy, WriteRequest, load_engine, load_policy
 from mnemowall.policy.engine import Decision
 from mnemowall.quarantine import Quarantine, QuarantineRefused
-from mnemowall.read import BackendItem, MemoryRef, read_memories, verify_item
+from mnemowall.read import BackendItem, MemoryRef, ReadCheck, read_memories, verify_item
 from mnemowall.signals.write import Op as WriteOp
 from mnemowall.signals.write import Scope, ScopeKind
 
@@ -80,7 +89,8 @@ NS_LABEL: Final = "_mem0"
 KEY_FIELD: Final = "_mnemowall_key"
 REF_FIELD: Final = "_mnemowall_ref"
 LABEL_KEY: Final = "mnemowall"
-MAX_SCAN: Final = 10_000  # rollback / delete_all page size
+MAX_SCAN: Final = 10_000  # rollback / delete_all page size; infer mode refuses larger scopes
+INFER_HISTORY: Final = 10  # Mem0 2.2.1 feeds the last 10 saved messages of a scope to its model
 # Mem0 identity, promoted and core payload keys: never caller metadata (D37, V4).
 _MEM0_RESERVED: Final = frozenset(
     {
@@ -297,6 +307,7 @@ class _Tracked:
     agent_id: str | None
     run_id: str | None
     head: VersionRecord | None  # the ledger head, when the item is a genuine version of it
+    check: ReadCheck | None = None
 
 
 class _Core:
@@ -317,8 +328,6 @@ class _Core:
     ) -> None:
         if mode not in ("strict", "infer"):
             raise ValueError("mode must be 'strict' or 'infer'")
-        if mode == "infer":  # M1b-03 (beta, detective) is not built yet
-            raise ValueError("infer mode is not available in this version")
         self._inner = inner
         self._ledger = ledger
         self._quarantine = quarantine
@@ -381,6 +390,8 @@ class _Core:
         op: WriteOp,
         head: VersionRecord | None,
         claimed_type: MemoryType | None = None,
+        *,
+        raise_deny: bool = True,
     ) -> tuple[Decision, Any, bool]:
         target_type = None
         protected = False
@@ -401,7 +412,7 @@ class _Core:
         )
         result = self._engine.evaluate(request)
         decision = result.decision
-        if decision.action is Outcome.DENY:
+        if decision.action is Outcome.DENY and raise_deny:
             if not self.probe_result.ok:
                 raise MemoryWriteRefused("adapter_probe_failure")
             raise MemoryWriteDenied(",".join(decision.rule_ids) or "denied")
@@ -622,7 +633,7 @@ class _Core:
             raise MemoryWriteRefused("backend_error")
         return result
 
-    # --- infer mode (beta, detective; D40) -----------------------------------------------
+    # --- infer mode (beta, detective; D40, D53-D57) --------------------------------------
 
     def _add_infer(
         self,
@@ -631,8 +642,293 @@ class _Core:
         md: dict[str, Any],
         agent: str | None,
         run: str | None,
-    ) -> dict[str, Any]:  # pragma: no cover - unreachable until M1b-03 enables infer mode
-        raise MemoryWriteDenied("infer_mode_disabled")
+    ) -> dict[str, Any]:
+        """Let Mem0 extract and store, then reconcile its writes with policy and the ledger.
+
+        Everything runs under the per-user lock, so the before/after diff is this call's alone
+        (for writers in this process; signed writes from elsewhere are left alone, D53). Mem0
+        errors are counted and raised as ``backend_error`` only after every item it did store
+        has been checked.
+        """
+        scope: dict[str, Any] = {"user_id": ctx.user_id}
+        if agent is not None:
+            scope["agent_id"] = agent
+        if run is not None:
+            scope["run_id"] = run
+        history = hash_label("s-", "\0".join((ctx.user_id, agent or "", run or "")))
+        with self._user_lock(ctx.user_id):
+            before = self._scan(ctx, scope, MAX_SCAN)
+            if len(before) >= MAX_SCAN:
+                raise MemoryWriteRefused("scope_too_large")
+            floor = self._infer_floor(before, history)
+            self._ledger.append_event(
+                "infer", {"scope": history, "trust": current_write_trust().label}
+            )
+            failed = False
+            try:
+                self._call(
+                    "add",
+                    msgs,
+                    user_id=ctx.user_id,
+                    agent_id=agent,
+                    run_id=run,
+                    metadata=md or None,
+                    infer=True,
+                )
+            except Exception:  # noqa: BLE001 - nothing from Mem0 is re-raised (M1a-22)
+                failed = True
+            if failed:
+                diagnostics.record("backend_error")
+                _log.error("backend_error", extra={"adapter": MEM0, "op": "add"})
+            after = self._scan(ctx, scope, 2 * MAX_SCAN)
+            with trust_cap(floor):
+                results, broken = self._reconcile(ctx, before, after)
+            if len(after) >= 2 * MAX_SCAN:
+                broken = True  # the diff may be incomplete
+        if failed or broken:
+            raise MemoryWriteRefused("backend_error")
+        return {"results": results}
+
+    def _scan(self, ctx: _Ctx, scope: dict[str, Any], limit: int) -> dict[str, _Tracked]:
+        found = self._backend("get_all", filters=scope, top_k=limit)
+        out: dict[str, _Tracked] = {}
+        for item in self._owned(ctx, list(found.get("results", []))):
+            mem_id = item.get("id")
+            if not isinstance(mem_id, str):
+                continue
+            try:
+                out[mem_id] = self._track(ctx, item)
+            except NamespaceError:  # a raw item with a bad agent/run id: never ours, never trusted
+                out[mem_id] = _Tracked(item, "", {}, None, None, None, None, None)
+        return out
+
+    def _infer_floor(self, before: Mapping[str, _Tracked], history: str) -> TrustLevel:
+        """D54: Mem0's model may see any memory in scope and the last saved messages."""
+        levels = [
+            t.check.trust if t.check is not None else TrustLevel.UNKNOWN for t in before.values()
+        ]
+        for event in self._ledger.recent_events("infer", "scope", history, INFER_HISTORY):
+            levels.append(TRUST_BY_LABEL.get(str(event.get("trust")), TrustLevel.UNKNOWN))
+        return trust_min(levels) if levels else TrustLevel.OPERATOR
+
+    @staticmethod
+    def _current(t: _Tracked) -> bool:
+        return t.check is not None and t.check.verified and not t.check.stale
+
+    def _still_head(self, t: _Tracked) -> bool:
+        if t.check is None or t.head is None or t.head.status != "active":
+            return False
+        head = self._ledger.head(t.check.memory_id)
+        return head is not None and head.version_no == t.check.version_no
+
+    def _reconcile(
+        self, ctx: _Ctx, before: Mapping[str, _Tracked], after: Mapping[str, _Tracked]
+    ) -> tuple[list[dict[str, Any]], bool]:
+        results: list[dict[str, Any]] = []
+        broken = False
+        for mem_id, now in after.items():
+            then = before.get(mem_id)
+            if now.check is None or self._current(now):
+                continue  # signed and current (ours earlier, or another writer's), or not ours
+            if then is not None and (then.text, then.metadata) == (now.text, now.metadata):
+                continue  # an unverified item that was already there and did not change
+            if then is not None and self._current(then) and self._still_head(then):
+                res, ok = self._infer_changed(ctx, mem_id, then, now)
+            else:
+                res, ok = self._infer_new(ctx, mem_id, now)
+            results.append(res)
+            broken |= not ok
+        for mem_id, then in before.items():
+            if mem_id not in after and self._current(then) and self._still_head(then):
+                res, ok = self._infer_deleted(ctx, mem_id, then)
+                results.append(res)
+                broken |= not ok
+        return results, broken
+
+    def _try(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        """``_backend`` that reports failure as ``None`` / ``False`` instead of raising."""
+        try:
+            result = self._backend(name, *args, **kwargs)
+        except MemoryWriteRefused:
+            return False
+        return result if name == "add" else True
+
+    def _alert(self, name: str, decision: Decision) -> None:
+        diagnostics.record(name)
+        _log.warning(name, extra={"adapter": MEM0, "outcome": decision.outcome.value})
+
+    def _infer_prov(self, decision: Decision, t: _Tracked) -> dict[str, object]:
+        return {**self._provenance(decision, t.agent_id, t.run_id), "mode": "infer"}
+
+    def _remove(
+        self, ctx: _Ctx, mem_id: str, t: _Tracked, decision: Decision, stripped: Any, key: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Take a new item policy would not commit out of Mem0; quarantine it if policy says so."""
+        ok = self._try("delete", mem_id) is True
+        self._alert("infer_removed", decision)
+        if decision.action is Outcome.DENY:
+            return {
+                "id": None,
+                "memory": None,
+                "event": "DENIED",
+                LABEL_KEY: {"outcome": "denied", "rule_ids": list(decision.rule_ids)},
+            }, ok
+        ns = self._ns(ctx, t.agent_id, t.run_id)
+        prov = self._infer_prov(decision, t)
+        try:
+            item_id = self._quarantine_submit(decision, ns, key, serialize(stripped), False, prov)
+        except MemoryWriteRefused:
+            return {
+                "id": None,
+                "memory": None,
+                "event": "ERROR",
+                LABEL_KEY: {"outcome": "error"},
+            }, False
+        return {
+            "id": None,
+            "memory": None,
+            "event": "QUARANTINED",
+            LABEL_KEY: {"outcome": "quarantined", "item_id": item_id},
+        }, ok
+
+    def _infer_new(self, ctx: _Ctx, mem_id: str, t: _Tracked) -> tuple[dict[str, Any], bool]:
+        value = {"memory": t.text, "metadata": t.metadata}
+        decision, stripped, _ = self._evaluate(ctx, value, WriteOp.CREATE, None, raise_deny=False)
+        key = "k-" + uuid.uuid4().hex
+        if decision.action in (Outcome.QUARANTINE, Outcome.DENY):
+            return self._remove(ctx, mem_id, t, decision, stripped, key)
+        ns = self._ns(ctx, t.agent_id, t.run_id)
+        prov = self._infer_prov(decision, t)
+        record = self._sign(ns, key, stripped, decision, False, prov)
+        meta = {**stripped["metadata"], KEY_FIELD: key, REF_FIELD: self._ref(record)}
+        changes: dict[str, Any] = {"metadata": meta}
+        if stripped["memory"] != t.text:
+            changes["text"] = stripped["memory"]
+        if self._try("update", mem_id, **changes) is not True:
+            self._sign(ns, key, None, decision, False, prov, deleted_from=record)
+            self._try("delete", mem_id)
+            return {
+                "id": None,
+                "memory": None,
+                "event": "ERROR",
+                LABEL_KEY: {"outcome": "error"},
+            }, False
+        return {
+            "id": mem_id,
+            "memory": stripped["memory"],
+            "event": "ADD",
+            LABEL_KEY: self._summary(record, decision),
+        }, True
+
+    def _restore_target(self, t: _Tracked) -> tuple[VersionRecord, dict[str, Any], str] | None:
+        head = t.head
+        if head is None or head.content is None or t.key is None:
+            return None
+        value = json.loads(head.content)
+        meta = {**value["metadata"], KEY_FIELD: t.key, REF_FIELD: self._ref(head)}
+        return head, meta, value["memory"]
+
+    def _restored(
+        self, mem_id: str | None, head: VersionRecord, decision: Decision, item_id: str | None
+    ) -> dict[str, Any]:
+        self._alert("infer_restored", decision)
+        labels: dict[str, object] = {
+            "outcome": "restored",
+            "memory_id": head.memory_id,
+            "version_no": head.version_no,
+        }
+        if item_id is not None:
+            labels["item_id"] = item_id
+        return {"id": mem_id, "memory": None, "event": "RESTORED", LABEL_KEY: labels}
+
+    def _infer_changed(
+        self, ctx: _Ctx, mem_id: str, then: _Tracked, now: _Tracked
+    ) -> tuple[dict[str, Any], bool]:
+        """Mem0 rewrote a tracked memory: commit it as an update, or put the ledger head back."""
+        value = {"memory": now.text, "metadata": now.metadata}
+        decision, stripped, protected = self._evaluate(
+            ctx, value, WriteOp.UPDATE, then.head, raise_deny=False
+        )
+        ns = self._ns(ctx, then.agent_id, then.run_id)
+        prov = self._infer_prov(decision, then)
+        key = then.key or "k-" + uuid.uuid4().hex
+        if decision.action not in (Outcome.QUARANTINE, Outcome.DENY):
+            record = self._sign(ns, key, stripped, decision, protected, prov)
+            meta = {**stripped["metadata"], KEY_FIELD: key, REF_FIELD: self._ref(record)}
+            ok = self._try("update", mem_id, text=stripped["memory"], metadata=meta) is True
+            return {
+                "id": mem_id,
+                "memory": stripped["memory"],
+                "event": "UPDATE",
+                LABEL_KEY: self._summary(record, decision),
+            }, ok
+        item_id = None
+        if decision.action is Outcome.QUARANTINE:
+            try:
+                item_id = self._quarantine_submit(
+                    decision, ns, key, serialize(stripped), protected, prov
+                )
+            except MemoryWriteRefused:
+                item_id = None
+        target = self._restore_target(then)
+        if target is None:  # nothing to put back (content purged): take the change out instead
+            self._try("delete", mem_id)
+            self._alert("infer_removed", decision)
+            return {
+                "id": None,
+                "memory": None,
+                "event": "ERROR",
+                LABEL_KEY: {"outcome": "error"},
+            }, False
+        head, meta, text = target
+        ok = self._try("update", mem_id, text=text, metadata=meta) is True
+        return self._restored(mem_id, head, decision, item_id), ok
+
+    def _infer_deleted(self, ctx: _Ctx, mem_id: str, then: _Tracked) -> tuple[dict[str, Any], bool]:
+        """Mem0 deleted a tracked memory: sign the deletion, or put the ledger head back."""
+        decision, _, protected = self._evaluate(
+            ctx, None, WriteOp.DELETE, then.head, raise_deny=False
+        )
+        ns = self._ns(ctx, then.agent_id, then.run_id)
+        prov = self._infer_prov(decision, then)
+        key = then.key or "k-" + uuid.uuid4().hex
+        if decision.action not in (Outcome.QUARANTINE, Outcome.DENY):
+            self._sign(ns, key, None, decision, protected, prov, deleted_from=then.head)
+            return {
+                "id": mem_id,
+                "memory": None,
+                "event": "DELETE",
+                LABEL_KEY: {"outcome": "deleted"},
+            }, True
+        item_id = None
+        if decision.action is Outcome.QUARANTINE:
+            try:
+                item_id = self._quarantine_submit(
+                    decision, ns, key, "", protected, prov, op="delete"
+                )
+            except MemoryWriteRefused:
+                item_id = None
+        target = self._restore_target(then)
+        if target is None:
+            self._alert("infer_removed", decision)
+            return {
+                "id": None,
+                "memory": None,
+                "event": "ERROR",
+                LABEL_KEY: {"outcome": "error"},
+            }, False
+        head, meta, text = target
+        new_id = self._try(
+            "add",
+            [{"role": "user", "content": text}],
+            user_id=ctx.user_id,
+            agent_id=then.agent_id,
+            run_id=then.run_id,
+            metadata=meta,
+            infer=False,
+        )
+        ok = isinstance(new_id, str)
+        return self._restored(new_id if ok else None, head, decision, item_id), ok
 
     # --- reads -------------------------------------------------------------------------
 
@@ -753,6 +1049,7 @@ class _Core:
             _check_id(item.get("agent_id")),
             _check_id(item.get("run_id")),
             head,
+            check,
         )
 
     def get(self, memory_id: str) -> dict[str, Any] | None:

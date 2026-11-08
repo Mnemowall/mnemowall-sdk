@@ -186,11 +186,6 @@ def test_ct_m0_strict_006_bad_agent_or_run_ids_rejected_before_any_write(m0: M0,
     assert m0.ledger.verify().checked == 0
 
 
-def test_ct_m0_infer_mode_not_available_yet(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="not available"):
-        make_m0(tmp_path, mode="infer")
-
-
 # --- CT-M0-ID / FILTER / META ----------------------------------------------------------------
 
 

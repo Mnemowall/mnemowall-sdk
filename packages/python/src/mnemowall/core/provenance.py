@@ -12,7 +12,8 @@ Normative API (§3.5)::
 
 Write trust = min(the current turn's principal trust, the trust of every item in the window).
 Taint does **not** reset at user turns; it falls only when the item leaves the window.
-With no active session, :func:`current_write_trust` returns ``unknown``.
+With no active session, :func:`current_write_trust` returns ``unknown``. Inside
+``with trust_cap(level):`` it is also capped at ``level``; a cap can only lower trust (I9).
 
 Content passed in is kept in memory only, for the signals. It is never in ``repr``, logs or storage.
 The in-process SDK is not a security boundary against an agent with code execution (§3.1): such
@@ -40,6 +41,9 @@ from mnemowall.core.trust import Source, TrustLevel, default_trust, trust_min
 _LOG: Final = _log.get_logger("provenance")
 _CURRENT: contextvars.ContextVar[ProvenanceSession | None] = contextvars.ContextVar(
     "mnemowall_provenance_session", default=None
+)
+_CAP: contextvars.ContextVar[TrustLevel | None] = contextvars.ContextVar(
+    "mnemowall_trust_cap", default=None
 )
 _TOKEN_TTL_S: Final = 300.0
 _OBSERVE_FORBIDDEN: Final = {
@@ -242,4 +246,22 @@ def current_write_trust() -> TrustLevel:
         diagnostics.record("write_without_session")
         _LOG.warning("write_without_session", extra={"trust_level": TrustLevel.UNKNOWN.label})
         return TrustLevel.UNKNOWN
-    return sess.write_trust()
+    trust = sess.write_trust()
+    cap = _CAP.get()
+    return trust if cap is None else trust_min([trust, cap])
+
+
+@contextmanager
+def trust_cap(level: TrustLevel) -> Iterator[None]:
+    """Cap :func:`current_write_trust` at ``level`` inside the block (context-local, nestable).
+
+    For writes whose text came from somewhere the session never saw, such as Mem0's own model
+    reading stored memories and saved messages (D54). It only ever lowers trust; the session's
+    window is left as it is.
+    """
+    prev = _CAP.get()
+    token = _CAP.set(level if prev is None else trust_min([prev, level]))
+    try:
+        yield
+    finally:
+        _CAP.reset(token)
