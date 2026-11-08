@@ -74,11 +74,37 @@ with guard.session(tenant="acme", principal="alice", agent="assistant", session_
     prompt_text = "\n".join(h["memory"] for h in hits)  # already wrapped where policy says so
 ```
 
-- **Strict mode is the default.** Messages are stored verbatim (`infer=False`), so the text policy checks is the text that's stored. `add(..., infer=True)` is refused unless you opt into infer mode, which is a detective beta.
+- **Strict mode is the default.** Messages are stored verbatim (`infer=False`), so the text policy checks is the text that's stored. `add(..., infer=True)` is refused unless you opt into infer mode (below).
 - **Scope comes from the session.** The wrapper sets Mem0's `user_id` itself from tenant, scope and principal. `get`/`update`/`delete` on another user's id behave as "not found". `filters` accept plain equality only.
 - **`memory` in results is the model-facing text.** Anything below the policy's wrap threshold (by default, everything not from a verified user turn) comes back between per-read `mnemowall-item` markers. The stored text is in `result["mnemowall"]["raw"]`. When you use wrapped text, put `mnemowall.read.PREAMBLE` in the system prompt.
 - `reset()` and `history()` are not exposed. The ledger is the history (`mnemowall incident`, `export`).
-- Mem0 logs memory text at INFO/DEBUG. Keep the `mem0` logger at WARNING or above.
+- **Mem0's own logs can contain memory text:** at INFO (`Updating memory with data=…`) and in quoted errors at ERROR (`LLM extraction failed: …`). Set `logging.getLogger("mem0").setLevel(logging.CRITICAL)`. `mnemowall doctor` warns while it is lower.
+
+### Infer mode (beta, detective)
+
+```python
+memory = GuardedMemory(
+    Memory(config), ledger=ledger, quarantine=quarantine, tenant_id="acme", mode="infer"
+)
+memory.add(conversation, infer=True)  # Mem0's model extracts; Mnemowall checks what it stored
+```
+
+Mem0's model writes first and Mnemowall checks afterwards, so this mode **detects and undoes**; it does not prevent. Under a per-user lock, each `add(infer=True)`:
+
+1. lists the scope, lets Mem0 extract and store, then lists the scope again;
+2. checks every new or changed item against policy;
+3. signs what policy commits, removes what it would not (quarantining it where policy says so), and puts back any protected memory Mem0 changed or deleted. Alerts: `infer_removed`, `infer_restored`.
+
+Results report `ADD`, `UPDATE`, `DELETE`, `QUARANTINED`, `DENIED` or `RESTORED` per item.
+
+**Trust is lowered to what Mem0's model could have seen.** Mem0 shows its model existing memories in scope and the last 10 messages it saved for that scope. So each extracted item is judged at the lowest of: the session's trust, every memory in scope (unverified ones count as `unknown`), and the session trust of the last 10 infer calls in that scope (recorded as signed `infer` events in the ledger). One email-trust memory in a scope makes every later extraction there email-trust: instructions go to quarantine and facts are wrapped as data.
+
+Limits of the beta:
+- Between Mem0's write and the check, another reader can see the extracted text. It reads `unverified` (no reference yet).
+- Mem0 keeps the raw input messages, tainted ones included, in its own history database. Mnemowall does not manage, encrypt or erase that database.
+- The lock is per process. Signed writes from elsewhere are left alone, but another process running infer mode on the same user at the same time can confuse the before/after comparison.
+- Scopes with 10,000 or more memories are refused (`scope_too_large`).
+- Each committed item costs one extra Mem0 `update` (one embedding call), and each `add` two extra listings of the scope.
 
 ## Local policies (signed)
 

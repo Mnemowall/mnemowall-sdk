@@ -937,6 +937,31 @@ def test_append_event_accepts_identifiers_only(ledger: Ledger) -> None:
         ledger.append_event("version", {"a": "b"})
 
 
+def test_ledger_infer_events_and_recent_query(ledger: Ledger) -> None:
+    """M1b-03 (D54): signed ``infer`` events, queried newest first per scope."""
+    for i, trust in enumerate(("email", "user", "verified_user")):
+        ledger.append_event("infer", {"scope": "s-a", "trust": trust, "n": i})
+    ledger.append_event("infer", {"scope": "s-b", "trust": "web"})
+    ledger.append_event("review", {"item_id": "q-1", "scope": "s-a"})
+    got = ledger.recent_events("infer", "scope", "s-a", 2)
+    assert [e["trust"] for e in got] == ["verified_user", "user"]
+    assert [e["trust"] for e in ledger.recent_events("infer", "scope", "s-a", 10)] == [
+        "verified_user",
+        "user",
+        "email",
+    ]
+    assert ledger.recent_events("infer", "scope", "s-c", 10) == []
+    assert [k for _, k, _ in ledger.events()] == ["infer"] * 4 + ["review"]
+    assert ledger.verify().ok
+    for args in (
+        ("version", "scope", "s-a", 1),
+        ("infer", "Bad", "s-a", 1),
+        ("infer", "scope", "s-a", 0),
+    ):
+        with pytest.raises(LedgerError, match="event_query_invalid"):
+            ledger.recent_events(*args)
+
+
 # --- CAN-LEDGER-AT-REST --------------------------------------------------------------------
 
 

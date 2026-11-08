@@ -9,10 +9,12 @@ never content.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from mnemowall._log import library_log_level
 from mnemowall.core import diagnostics
 from mnemowall.keys import KeyProvider, KeyUnavailable
 from mnemowall.ledger import Ledger, LedgerError
@@ -40,6 +42,16 @@ _COUNTER_FINDINGS: Final = {
         "warning",
         "backend_error",
         "the memory backend failed during a write; nothing from its error was passed on",
+    ),
+    "infer_removed": (
+        "warning",
+        "infer_removed",
+        "Mem0 infer mode stored items policy would not commit; they were removed (see quarantine)",
+    ),
+    "infer_restored": (
+        "warning",
+        "infer_restored",
+        "Mem0 infer mode changed or deleted protected memories; the signed versions were put back",
     ),
     "principal_mismatch": (
         "warning",
@@ -190,6 +202,7 @@ def run_checks(
                     f" buffer (quarantine store was down)",
                 )
             )
+    mem0_seen = False
     for store in stores:
         probe_result = getattr(store, "probe_result", None)
         if probe_result is None:
@@ -212,7 +225,9 @@ def run_checks(
                     f" guaranteed ({', '.join(probe_result.reasons)}); writes refused",
                 )
             )
-        if type(store).__module__ == "mnemowall.adapters.mem0" and _mem0_telemetry_on():
+        is_mem0 = type(store).__module__ == "mnemowall.adapters.mem0"
+        mem0_seen = mem0_seen or is_mem0
+        if is_mem0 and _mem0_telemetry_on():
             add(
                 Finding(
                     "warning",
@@ -221,6 +236,15 @@ def run_checks(
                     " before importing mem0",
                 )
             )
+    if mem0_seen and library_log_level("mem0") < logging.CRITICAL:
+        add(
+            Finding(
+                "warning",
+                "mem0_logs_content",
+                "the mem0 logger can emit memory text (INFO) and quoted errors (ERROR);"
+                " set the 'mem0' logger to CRITICAL",
+            )
+        )
     counts = diagnostics.counters() if counters is None else dict(counters)
     for name, (severity, code, message) in _COUNTER_FINDINGS.items():
         n = counts.get(name, 0)

@@ -66,7 +66,7 @@ SCHEMA_VERSION: Final = 1
 LEDGER_DOMAIN: Final = b"mnemowall/ledger/v1\x00"
 HEAD_DOMAIN: Final = b"mnemowall/ledger-head/v1\x00"
 GENESIS_HASH: Final = "0" * 64
-EVENT_KINDS: Final = frozenset({"quarantine", "review", "rollback"})
+EVENT_KINDS: Final = frozenset({"quarantine", "review", "rollback", "infer"})
 PURGE_REASONS: Final = frozenset({"erasure", "retention"})
 MIN_RETENTION_DAYS: Final = 1
 MAX_RETENTION_DAYS: Final = 3650
@@ -633,7 +633,7 @@ class Ledger:
             )
 
     def append_event(self, kind: str, fields: Mapping[str, object]) -> int:
-        """Append a quarantine, review or rollback event.
+        """Append a quarantine, review, rollback or infer event.
 
         Values must be ids, numbers, booleans or null; no free text reaches the ledger.
         """
@@ -870,10 +870,24 @@ class Ledger:
         with self._lock:
             found = self._con.execute(
                 "SELECT seq, kind, body FROM entries"
-                " WHERE kind IN ('quarantine', 'review', 'rollback')"
+                " WHERE kind IN ('quarantine', 'review', 'rollback', 'infer')"
                 " ORDER BY seq"
             ).fetchall()
         return [(seq, kind, json.loads(body)["fields"]) for seq, kind, body in found]
+
+    def recent_events(
+        self, kind: str, field: str, value: str, limit: int
+    ) -> list[dict[str, object]]:
+        """The newest ``limit`` ``kind`` events whose ``field`` equals ``value``, newest first."""
+        if kind not in EVENT_KINDS or not _FIELD.fullmatch(field) or limit < 1:
+            raise LedgerError("event_query_invalid")
+        with self._lock:
+            found = self._con.execute(
+                "SELECT body FROM entries WHERE kind = ?"
+                " AND json_extract(body, '$.fields.' || ?) = ? ORDER BY seq DESC LIMIT ?",
+                (kind, field, value, limit),
+            ).fetchall()
+        return [json.loads(body)["fields"] for (body,) in found]
 
     def export_head(self) -> tuple[int, str]:
         """``(seq, hash)`` of the signed head, for safekeeping outside this file (D17)."""

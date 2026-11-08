@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import stat
@@ -275,6 +276,16 @@ def test_ut_doctor_004_cli(setup: dict[str, Any], capsys: pytest.CaptureFixture[
     assert "ledger_tampered" in capsys.readouterr().out
 
 
+def found_codes(store: Any, *, level: int) -> set[str]:
+    mem0_log = logging.getLogger("mem0")
+    before = mem0_log.level
+    mem0_log.setLevel(level)
+    try:
+        return {f.code for f in run_checks(stores=[store] if store else [], counters={})}
+    finally:
+        mem0_log.setLevel(before)
+
+
 def test_ut_doctor_005_mem0_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """M1b-02: doctor covers Mem0 wrappers: probe failure, telemetry on, backend errors."""
     import mem0.memory.telemetry as telemetry
@@ -293,10 +304,20 @@ def test_ut_doctor_005_mem0_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "unwrapped_store" not in found
     found = {f.code: f.severity for f in run_checks(stores=[bad], counters={})}
     assert found["adapter_probe_failure"] == "error"
+    assert found_codes(good, level=logging.WARNING) >= {"mem0_logs_content"}
+    assert "mem0_logs_content" not in found_codes(good, level=logging.CRITICAL)
+    assert "mem0_logs_content" not in found_codes(None, level=logging.WARNING)
     monkeypatch.setattr(telemetry, "MEM0_TELEMETRY", True)
     found = {f.code: f.severity for f in run_checks(stores=[good], counters={})}
     assert found["mem0_telemetry_enabled"] == "warning"
     counted = {f.code for f in run_checks(counters={"backend_error": 2, "principal_mismatch": 1})}
     assert {"backend_error", "principal_mismatch"} <= counted
+    infer = {
+        f.code: f.severity for f in run_checks(counters={"infer_removed": 1, "infer_restored": 1})
+    }
+    assert infer == {"infer_removed": "warning", "infer_restored": "warning"} | {
+        k: v for k, v in infer.items() if k not in ("infer_removed", "infer_restored")
+    }
+    assert {"infer_removed", "infer_restored"} <= set(infer)
     q.close()
     led.close()
