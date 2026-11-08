@@ -83,7 +83,9 @@ with guard.session(tenant="acme", principal="alice", agent="assistant", session_
 ### Infer mode (beta, detective)
 
 ```python
-memory = GuardedMemory(Memory(config), ledger=ledger, quarantine=quarantine, tenant_id="acme", mode="infer")
+memory = GuardedMemory(
+    Memory(config), ledger=ledger, quarantine=quarantine, tenant_id="acme", mode="infer"
+)
 memory.add(conversation, infer=True)  # Mem0's model extracts; Mnemowall checks what it stored
 ```
 
