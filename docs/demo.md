@@ -31,11 +31,11 @@ The demo drives a scripted agent through LangGraph's in-memory store, wrapped by
 
 **7. Evidence (20 s).** "Export the ledger and verify it: every entry is hash-chained and the head is signed. Edit one entry and verification fails *at that entry*."
 
-**8. Red-team pack (25 s).** "The red-team pack runs six attack classes. Against a plain store it fails everywhere; against Mnemowall it catches all of them. Caveat: the corpus is still small, so these rates are a regression gate, not a published claim."
+**8. Red-team pack (25 s).** "The red-team pack runs eight attack classes, 500 attacks each. Against a plain store it fails everywhere; against Mnemowall it meets every target. Caveat: we wrote the corpus ourselves and fixed the gaps it found, so treat these numbers as a ceiling, not a field result."
 
 **Close (10 s).** "Provenance on every write, safer reads, version control for memory. `pip install mnemowall`."
 
 ## What the demo does not show
 - Wrapping reduces risk; it doesn't guarantee a model ignores wrapped content.
 - Signing happens in the SDK process. An agent with code execution in that process could read the key (see SECURITY.md).
-- Red-team rates come from a small v0 corpus (fewer than 400 attacks per class), so they aren't publishable catch rates.
+- Red-team rates come from a self-written, templated corpus. The detectors were tuned on the gaps it revealed, so the rates are optimistic. Third-party datasets come later.

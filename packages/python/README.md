@@ -137,7 +137,7 @@ policy = load_policy_file("policy.yaml", trusted_keys=["ed25519:..."])
 | `mnemowall export --jsonl --out FILE` | Content-free, tamper-evident evidence |
 | `mnemowall verify-ledger [--export FILE] [--expected-head SEQ:HASH]` | Verify the ledger or an export |
 | `mnemowall doctor` | Unsafe or degraded settings |
-| `mnemowall redteam [--unprotected]` | The red-team pack v0 |
+| `mnemowall redteam [--unprotected] [--benign] [--sample N]` | The red-team pack: 8 attack classes × 500, and a 5,600-sample benign set |
 
 Try everything at once, with no network and no keys: `make demo` in the repository.
 
@@ -147,6 +147,6 @@ Try everything at once, with no network and no keys: `make demo` in the reposito
 - **Code that bypasses the wrapper.** With LangGraph, wrapping protects prompts only if you use `value["mnemowall"]["text"]`; code that reads fields directly bypasses it. Reads through the raw inner store or the raw Mem0 object bypass Mnemowall entirely.
 - **Same-scope copies in Mem0.** A Mem0 item copied byte for byte by someone with direct backend access, inside the *same* user's scope, reads as a verified duplicate of a genuine memory. A copy into another user, agent or run scope reads `unverified`.
 - **Detection is lexical in 0.1.** Fact-shaped poisoning without sinks or obfuscation is stored as wrapped data, not blocked.
-- **Small red-team corpus.** Red-team rates come from a small v0 corpus and are not publishable catch rates.
+- **Self-written red-team corpus.** The corpus (500 attacks per class, 5,600 benign samples) is templated by the same team that wrote the detectors, and four detector gaps it revealed were fixed before release. Its catch rates are a ceiling on our own test data, not an estimate for real attacks. No third-party attack datasets are included yet.
 
 Licensed under Apache-2.0. Report vulnerabilities to security@mnemowall.com (see SECURITY.md).

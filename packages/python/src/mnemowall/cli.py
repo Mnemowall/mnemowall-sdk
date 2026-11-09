@@ -4,7 +4,7 @@
 * ``review list|show|approve|reject|promote|cancel|complete`` (M1a-14)
 * ``incident MEMORY_ID VERSION`` (M1a-20)
 * ``export --jsonl``, ``verify-ledger``, ``doctor`` (M1a-21)
-* ``redteam [--unprotected]`` (M1a-23)
+* ``redteam [--unprotected] [--benign] [--sample N]`` (M1a-23, M1b-09)
 * ``policy keygen|sign|verify`` (M1b-06): locally signed policy files
 
 Output never includes key material. ``review list`` shows no content; ``review show`` prints
@@ -107,6 +107,8 @@ def _parser() -> argparse.ArgumentParser:
         "redteam", help="run the red-team poisoning pack (needs the langgraph extra)"
     )
     rt.add_argument("--unprotected", action="store_true", help="run against a plain store")
+    rt.add_argument("--benign", action="store_true", help="measure false positives instead")
+    rt.add_argument("--sample", type=int, default=None, help="first N items per class/category")
     pol = sub.add_parser("policy", help="sign and verify local policy files")
     pol_actions = pol.add_subparsers(dest="action", required=True)
     kg = pol_actions.add_parser("keygen", help="create a policy-signing key (keep it off servers)")
@@ -360,9 +362,15 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _redteam(args: argparse.Namespace) -> int:
-    from mnemowall.redteam import run_pack  # needs the langgraph extra
+    from mnemowall.redteam import run_benign, run_pack  # needs the langgraph extra
 
-    report = run_pack(protected=not args.unprotected)
+    if args.sample is not None and args.sample < 1:
+        print("redteam: --sample must be at least 1", file=sys.stderr)
+        return 2
+    if args.benign:
+        print(run_benign(sample=args.sample).render())
+        return 0  # a measurement, not a gate
+    report = run_pack(protected=not args.unprotected, sample=args.sample)
     print(report.render())
     return 0 if report.passed else 1
 
