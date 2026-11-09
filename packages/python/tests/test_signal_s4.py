@@ -10,8 +10,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from mnemowall.core.model import MemoryType
+from mnemowall.signals import s4_obfuscation as s4mod
 from mnemowall.signals.s2_type import classify
-from mnemowall.signals.s4_obfuscation import normalize, s4_obfuscation
+from mnemowall.signals.s4_obfuscation import fold, normalize, s4_obfuscation
 
 
 def tags(s: str) -> str:
@@ -172,3 +173,12 @@ def test_s4_bare_zero_width_joiners_are_hidden_text() -> None:
     assert "S4.invisible" not in s4_obfuscation(f"Our family {family} photo").labels
     toned = "\U0001f44d\U0001f3fd\u200d\u2642\ufe0f"
     assert "S4.invisible" not in s4_obfuscation(f"ok {toned}").labels
+
+
+@given(st.text(alphabet=st.characters(max_codepoint=0x7F), max_size=400))
+def test_pt_ascii_fast_path_matches_full_normalisation(text: str) -> None:
+    """M1b-10: the ASCII shortcut in fold/normalize gives exactly the slow-path result."""
+    slow = s4mod._strip(unicodedata.normalize("NFKC", text))
+    assert fold(text) == slow
+    full = s4mod._strip(unicodedata.normalize("NFKC", slow.casefold()))
+    assert normalize(text) == full
