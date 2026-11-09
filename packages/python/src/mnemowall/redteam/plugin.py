@@ -14,7 +14,10 @@ import pytest
 
 @pytest.fixture
 def mnemowall_redteam() -> Callable[..., Any]:
-    """Return ``mnemowall.redteam.run_pack``: ``report = mnemowall_redteam(protected=True)``."""
+    """Return ``mnemowall.redteam.run_pack``: ``report = mnemowall_redteam(protected=True)``.
+
+    Pass ``sample=N`` for a quick run over the first N attacks per class.
+    """
     from mnemowall.redteam import run_pack  # lazy by design
 
     return run_pack

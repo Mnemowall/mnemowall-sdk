@@ -36,7 +36,7 @@ from mnemowall.policy.schema import CompiledPolicy, Rule
 from mnemowall.signals import s3_sinks
 from mnemowall.signals.base import SignalResult
 from mnemowall.signals.s2_type import classify
-from mnemowall.signals.s4_obfuscation import normalize, s4_obfuscation
+from mnemowall.signals.s4_obfuscation import fold, normalize, s4_obfuscation
 from mnemowall.signals.s10_indirection import s10_indirection
 from mnemowall.signals.write import (
     Op,
@@ -267,7 +267,8 @@ def _classify(normalized: str) -> MemoryType:
 
 def _content_signals(raw: str, normalized: str, known: s3_sinks.KnownSinks) -> list[SignalResult]:
     s3_raw = s3_sinks.s3_new_sinks(raw, known)
-    s3_norm = s3_sinks.s3_new_sinks(normalized, known)
+    # Folded (NFKC, case kept) and refanged: full-width and defanged sinks (M1b-09 finding).
+    s3_norm = s3_sinks.s3_new_sinks(s3_sinks.refang(fold(raw)), known)
     labels = tuple(sorted(set(s3_raw.labels) | set(s3_norm.labels)))
     s3 = SignalResult("S3", bool(labels), max(s3_raw.risk, s3_norm.risk), labels)
     return [s3, s4_obfuscation(raw), s10_indirection(normalized)]

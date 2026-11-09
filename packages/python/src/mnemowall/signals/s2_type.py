@@ -105,17 +105,56 @@ def _rules() -> list[tuple[str, float, Any]]:
     return _compiled
 
 
-def classify(text: str) -> S2Result:
-    """Classify ``text`` (callers enforce the size cap first). Riskiest type wins."""
+_SPACED: Final = r"(?i)\b(?:[a-z][ .*_-]){1,40}[a-z]\b"
+_LEET: Final = str.maketrans("013457@$", "oieastas")
+_spaced: Any = None
+
+
+def _despace(text: str) -> str:
+    """Join letter-spaced words ("f r o m", "a-l-w-a-y-s") back together."""
+    global _spaced
+    if _spaced is None:
+        _spaced = regex.compile(_SPACED)
+    out, last = [], 0
+    for m in _spaced.finditer(text):
+        out += [text[last : m.start()], "".join(c for c in m.group(0) if c.isalpha())]
+        last = m.end()
+    return "".join(out) + text[last:] if out else text
+
+
+def _deleet(text: str) -> str:
+    """Map digits used as letters ("fr0m", "alw4ys") back, only inside words with letters."""
+    words = text.split(" ")
+    for i, w in enumerate(words):
+        if len(w) <= 24 and any(c.isalpha() for c in w) and any(c in "013457@$" for c in w):
+            words[i] = w.translate(_LEET)
+    return " ".join(words)
+
+
+def _fire(text: str) -> list[tuple[str, float]]:
     fired: list[tuple[str, float]] = []
-    steps = 0
     for rid, risk, rx in _rules():
         if rid == "S2.steps":
-            steps = sum(1 for _ in rx.finditer(text))
-            if steps >= 2:
+            if sum(1 for _ in rx.finditer(text)) >= 2:
                 fired.append((rid, risk))
         elif rx.search(text) is not None:
             fired.append((rid, risk))
+    return fired
+
+
+def classify(text: str) -> S2Result:
+    """Classify ``text`` (callers enforce the size cap first). Riskiest type wins.
+
+    A de-spaced, de-leeted copy is classified too (M1b-09 red-team finding); its rules are
+    added, never subtracted, and ``S2.deobfuscated`` marks that the copy found more.
+    """
+    fired = _fire(text)
+    variant = "\n".join(" ".join(line.split()) for line in _deleet(_despace(text)).split("\n"))
+    if variant != text:
+        have = {rid for rid, _ in fired}
+        extra = [(rid, risk) for rid, risk in _fire(variant) if rid not in have]
+        if extra:
+            fired += [*extra, ("S2.deobfuscated", 0.0)]
     ids = tuple(rid for rid, _ in fired)
     risk = max((r for _, r in fired), default=0.0)
     if "S2.steps" in ids or "S2.first_then" in ids:

@@ -9,7 +9,7 @@ First usable release (alpha).
   - forgery stripping of `_prov` and trust fields;
   - `@mnemowall.source`;
   - LangChain tool-output callback.
-- **Signals:** S1, S2 (lexicon), S3 (sinks), S4 (obfuscation), S5, S7, S10. S3 covers the full §3.5 list: URLs, emails, image beacons, IBANs, phone numbers, checksummed crypto addresses (Bech32/Bech32m, Base58Check, `0x`), credential paths and shell download-and-run.
+- **Signals:** S1, S2 (lexicon), S3 (sinks), S4 (obfuscation), S5, S7, S10. S3 covers the full §3.5 list: URLs, emails, image beacons, IBANs, phone numbers, checksummed crypto addresses (Bech32/Bech32m, Base58Check, `0x`), credential paths and shell download-and-run. Sinks are also matched after NFKC folding and refanging (`hxxps://`, `[.]`, `[at]`). S2 also classifies a de-spaced, de-leeted copy (`S2.deobfuscated`). S4 flags short base64/hex blobs that decode to readable text (`S4.encoded_text`).
 - **Write policy:**
   - invariants I1–I9 with a built-in strict default;
   - `enforce` and `shadow` modes;
@@ -42,6 +42,7 @@ First usable release (alpha).
   - fails closed to the strict default;
   - a weaker-than-default policy waits 24 h;
   - YAML via `safe_load` only (`mnemowall[yaml]`).
+- **Red-team pack, corpus v1:** eight classes (T1a, T1b, T1c, T1d, T5, T6, T8, T10), 500 attacks each, plus 5,600 benign samples in ten categories (most of them trusted-user hard negatives). Generated reproducibly from encoded, self-written templates (pinned SHA-256); rates reported with Wilson 95% intervals. `mnemowall redteam --benign` reports false positives per category; `--sample N` runs a quick subset.
 - **Review delivery:** `deliver_reviewed()` on both adapters writes approved and promoted items into the memory store. It is idempotent, a newer write wins, and it stays within the adapter's tenant, scope and backend. An approved quarantined *delete* now commits a deletion, and can't be promoted.
 - **CLI:** `keys`, `review`, `incident`, `export`, `verify-ledger`, `doctor`, `redteam`.
 - **Red-team pack v0** (T1a, T1d, T5, T6, T8, T10), `make bench` and `make demo`.

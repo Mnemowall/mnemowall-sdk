@@ -34,10 +34,15 @@ _EMAIL: Final = regex.compile(
 _IBAN: Final = regex.compile(r"\b([A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]){11,30})\b")
 _PHONE_INTL: Final = regex.compile(r"(?i)(?:\btel:\s*|\+)(\d[\d ().-]{6,22}\d)")
 _PHONE_CUE: Final = regex.compile(
-    r"(?i)\b(?:call|phone|text|sms|whatsapp|signal|telegram|fax|tel|mobile|cell|hotline|dial)\b"
+    r"(?i)\b(?:call|phone|sms|whatsapp|signal|telegram|fax|tel|mobile|cell|hotline|dial)\b"
     r"[^\n\d+]{0,20}(\(?\d[\d ().-]{5,20}\d)"
 )
-_DATE_LIKE: Final = regex.compile(r"^\d{4}-\d{2}-\d{2}$|^\d{1,2}[:.]\d{2}")
+_DATE_LIKE: Final = regex.compile(
+    r"^(?:\d{4}-\d{2}-\d{2}|\d{1,2}[:.]\d{2}(?:\s*-\s*\d{1,2}[:.]\d{2})?)$"
+)
+_DEFANG_SCHEME: Final = regex.compile(r"(?i)\bhxxp(s?)(?:\[:\]|:)//")
+_DEFANG_DOT: Final = regex.compile(r"(?i)\[\.\]|\(\.\)|\[dot\]|\(dot\)|\{dot\}")
+_DEFANG_AT: Final = regex.compile(r"(?i)\[at\]|\(at\)|\[@\]|\{at\}")
 _BECH32: Final = regex.compile(r"(?i)\b((?:bc|tb|ltc)1[ac-hj-np-z02-9]{8,87})\b")
 _BASE58: Final = regex.compile(r"\b([13][1-9A-HJ-NP-Za-km-z]{25,34})\b")
 _ETH: Final = regex.compile(r"\b0x[0-9a-fA-F]{40}\b")
@@ -125,13 +130,28 @@ def _ibans(text: str) -> list[str]:
 
 def _phones(text: str) -> list[str]:
     out = []
-    for pattern in (_PHONE_INTL, _PHONE_CUE):
+    for pattern, most in ((_PHONE_INTL, 15), (_PHONE_CUE, 12)):
         for m in pattern.finditer(text):
             raw = m.group(1)
             digits = "".join(c for c in raw if c.isdigit())
-            if 7 <= len(digits) <= 15 and not _DATE_LIKE.search(raw.strip("( ")):
+            if 7 <= len(digits) <= most and not _DATE_LIKE.search(raw.strip("( ")):
                 out.append(digits[-10:])  # compare national significant digits
     return out
+
+
+def _replace(pattern: Any, text: str, make: Any) -> str:
+    out, last = [], 0
+    for m in pattern.finditer(text):
+        out += [text[last : m.start()], make(m)]
+        last = m.end()
+    return "".join(out) + text[last:] if out else text
+
+
+def refang(text: str) -> str:
+    """Undo common defanging (``hxxps://``, ``[.]``, ``(dot)``, ``[at]``) so the sink is seen."""
+    text = _replace(_DEFANG_SCHEME, text, lambda m: f"http{m.group(1).lower()}://")
+    text = _replace(_DEFANG_DOT, text, lambda _m: ".")
+    return _replace(_DEFANG_AT, text, lambda _m: "@")
 
 
 def _bech32_ok(addr: str) -> bool:
@@ -152,6 +172,8 @@ def _bech32_ok(addr: str) -> bool:
 
 
 def _base58check_ok(addr: str) -> bool:
+    if not addr or any(c not in _B58 for c in addr):
+        return False
     n = 0
     for c in addr:
         n = n * 58 + _B58.index(c)

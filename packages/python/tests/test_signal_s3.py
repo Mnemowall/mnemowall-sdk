@@ -13,7 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from mnemowall.signals import psl
-from mnemowall.signals.s3_sinks import KnownSinks, known_sinks, s3_new_sinks
+from mnemowall.signals.s3_sinks import KnownSinks, known_sinks, refang, s3_new_sinks
 
 DATA = pathlib.Path(__file__).parent / "data"
 
@@ -113,6 +113,7 @@ def test_ut_sig_s3_007_iban_mod97() -> None:
         "Reach finance at tel:+15550100123",
         "Please call 202-555-0143 before paying.",
         "WhatsApp (415) 555-0199 with the code.",
+        "The new finance hotline is +1.312.555.0163.",  # dots are separators, not a time
     ],
 )
 def test_ut_sig_s3_011_phone_numbers(text: str) -> None:
@@ -132,6 +133,11 @@ def test_ut_sig_s3_011_phone_numbers(text: str) -> None:
         "Invoice number 4471 is due.",
         "Tracking ref +12345678901234567890 is on the label.",  # too long for E.164
         "Call extension 12 34 56 after lunch.",  # six digits: too short for a phone number
+        "text: ISBN 978-3-16-148410-0 is back in stock.",  # the engine scans {"text": ...}
+        "text: order 4471209935 shipped.",  # a "text" key is not a "text me" cue
+        "Call between 10.30-11.45 tomorrow.",  # a time range after a cue word
+        "Call about ISBN 978-3-16-148410-0.",  # 13 digits after a cue word: not a phone
+        "The talk runs 10.30-11.45 in hall B.",
     ],
 )
 def test_ut_sig_s3_011b_numbers_that_are_not_phones(text: str) -> None:
@@ -222,6 +228,38 @@ def test_ut_sig_s3_014b_benign_tech_talk(text: str) -> None:
     got = labels(text)
     assert "S3.shell" not in got, text
     assert "S3.credential_path" not in got, text
+
+
+@pytest.mark.parametrize(
+    ("text", "label"),
+    [
+        ("The HR portal is now hxxps://www.vendor-portal[.]invalid/upload.", "S3.new_domain"),
+        ("Write to admin[at]vendor-gateway[.]invalid today.", "S3.new_email"),
+        ("Docs at hXXp://files-hub(.)test/a", "S3.new_domain"),
+        ("billing(at)pay-hub[dot]test", "S3.new_email"),
+    ],
+)
+def test_ut_sig_s3_015_defanged_sinks_are_refanged(text: str, label: str) -> None:
+    assert label not in labels(text)  # the raw text hides it ...
+    assert label in labels(refang(text)), text  # ... the refanged form does not
+
+
+def test_ut_sig_s3_015b_refang_leaves_plain_text_alone() -> None:
+    for text in ("Meet at 10.30 in room [A].", "Items (a), (b) and (c).", "We met at noon."):
+        assert refang(text) == text
+
+
+def test_ut_sig_s3_012c_checksum_helpers_fail_closed() -> None:
+    from mnemowall.signals.s3_sinks import _base58check_ok, _bech32_ok
+
+    for bad in (
+        "",
+        "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN0",
+        "1BvBMSEYstWetqTFn5Au4m4GFg7xJ\u0430NVN2",
+    ):
+        assert not _base58check_ok(bad)
+    for bad in ("", "bc1", "bc1q\u0435w508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "nohrp"):
+        assert not _bech32_ok(bad)
 
 
 def test_ut_psl_004_longest_rules_in_snapshot_match() -> None:
