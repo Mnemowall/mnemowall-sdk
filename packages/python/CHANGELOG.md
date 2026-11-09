@@ -43,6 +43,7 @@ First usable release (alpha).
   - a weaker-than-default policy waits 24 h;
   - YAML via `safe_load` only (`mnemowall[yaml]`).
 - **Red-team pack, corpus v1:** eight classes (T1a, T1b, T1c, T1d, T5, T6, T8, T10), 500 attacks each, plus 5,600 benign samples in ten categories (most of them trusted-user hard negatives). Generated reproducibly from encoded, self-written templates (pinned SHA-256); rates reported with Wilson 95% intervals. `mnemowall redteam --benign` reports false positives per category; `--sample N` runs a quick subset.
+- **Benchmark report v0:** `make bench` (`python -m mnemowall.bench_report`) writes one JSON and one Markdown report with red-team catch rates (Wilson 95%, protected and unprotected), benign false positives per category, and hot-path latency per stage against the §3.8 budgets, plus package pins, corpus seed and SHA-256, hardware and load.
 - **Review delivery:** `deliver_reviewed()` on both adapters writes approved and promoted items into the memory store. It is idempotent, a newer write wins, and it stays within the adapter's tenant, scope and backend. An approved quarantined *delete* now commits a deletion, and can't be promoted.
 - **CLI:** `keys`, `review`, `incident`, `export`, `verify-ledger`, `doctor`, `redteam`.
 - **Red-team pack v0** (T1a, T1d, T5, T6, T8, T10), `make bench` and `make demo`.

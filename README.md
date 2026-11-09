@@ -6,5 +6,5 @@
 
 - [`packages/python`](packages/python/README.md): the `mnemowall` Python SDK (Apache-2.0). Quickstart, CLI and limits are there.
 - `make demo`: the 8-step demo ([docs/demo.md](docs/demo.md)), with no network and no keys.
-- `make bench`, `make redteam`: hot-path latency and the red-team pack.
+- `make bench`: benchmark report (red-team rates with Wilson intervals, benign false positives, hot-path latency, pins and hardware). `make redteam`: the red-team pack on its own.
 - Security reports: see [SECURITY.md](SECURITY.md).

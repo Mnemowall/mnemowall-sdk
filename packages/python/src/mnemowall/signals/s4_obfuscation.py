@@ -155,10 +155,14 @@ def _strip(text: str) -> str:
 def fold(text: str) -> str:
     """NFKC with format/invisible/tag characters dropped, case kept: for case-sensitive sinks
     (IBANs, Base58 wallets) written in full-width or other compatibility forms (M1b-09)."""
+    if text.isascii():  # NFKC and the strip are no-ops on ASCII
+        return text
     return _strip(unicodedata.normalize("NFKC", text))
 
 
 def normalize(text: str) -> str:
     """Matching form: NFKC, drop format/invisible/tag characters, casefold. Idempotent."""
+    if text.isascii():  # NFKC and the strip are no-ops on ASCII; casefold is lower()
+        return text.lower()
     out = _strip(unicodedata.normalize("NFKC", text)).casefold()
     return _strip(unicodedata.normalize("NFKC", out))

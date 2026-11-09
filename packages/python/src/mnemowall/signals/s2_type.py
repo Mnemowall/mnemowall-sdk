@@ -124,6 +124,8 @@ def _despace(text: str) -> str:
 
 def _deleet(text: str) -> str:
     """Map digits used as letters ("fr0m", "alw4ys") back, only inside words with letters."""
+    if not any(c in text for c in "013457@$"):  # nothing that could be mapped
+        return text
     words = text.split(" ")
     for i, w in enumerate(words):
         if len(w) <= 24 and any(c.isalpha() for c in w) and any(c in "013457@$" for c in w):

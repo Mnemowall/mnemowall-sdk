@@ -26,3 +26,4 @@ sbom*.json
 ._*
 # local benchmark output (results are recorded in progress logs)
 bench-results.json
+bench-report.md

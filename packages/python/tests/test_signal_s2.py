@@ -6,9 +6,12 @@ import time
 from collections import Counter
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from s2_fixtures import DISGUISED, FACTS, INSTRUCTIONS, LABELLED, PREFERENCES, PROCEDURES
 
 from mnemowall.core.model import MemoryType
+from mnemowall.signals import s2_type
 from mnemowall.signals.s2_type import classify
 
 INSTRUCTION_LIKE = {MemoryType.STANDING_INSTRUCTION, MemoryType.PROCEDURE}
@@ -157,3 +160,15 @@ def test_ut_sig_s2_013b_deobfuscation_leaves_facts_alone(text: str) -> None:
     r = classify(text)
     assert r.memory_type is MemoryType.FACT, text
     assert "S2.deobfuscated" not in r.rules
+
+
+@given(st.text(max_size=300))
+def test_pt_deleet_hint_never_skips_a_change(text: str) -> None:
+    """M1b-10: the RE2 pre-check only skips texts the full de-leet would leave unchanged."""
+    words = text.split(" ")
+    for i, w in enumerate(words):
+        if len(w) <= 24 and any(c.isalpha() for c in w) and any(c in "013457@$" for c in w):
+            words[i] = w.translate(s2_type._LEET)
+    slow = " ".join(words)
+    if s2_type._deleet(text) == text and slow != text:
+        pytest.fail(f"pre-check skipped a change: {text!r}")
