@@ -9,7 +9,7 @@ First usable release (alpha).
   - forgery stripping of `_prov` and trust fields;
   - `@mnemowall.source`;
   - LangChain tool-output callback.
-- **Signals:** S1, S2 (lexicon), S3 (sinks), S4 (obfuscation), S5, S7, S10.
+- **Signals:** S1, S2 (lexicon), S3 (sinks), S4 (obfuscation), S5, S7, S10. S3 covers the full §3.5 list: URLs, emails, image beacons, IBANs, phone numbers, checksummed crypto addresses (Bech32/Bech32m, Base58Check, `0x`), credential paths and shell download-and-run.
 - **Write policy:**
   - invariants I1–I9 with a built-in strict default;
   - `enforce` and `shadow` modes;
