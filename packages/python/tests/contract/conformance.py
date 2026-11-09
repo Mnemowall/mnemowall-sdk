@@ -274,4 +274,105 @@ class Mem0InferDriver(Mem0Driver):
         return res["id"]  # type: ignore[no-any-return]
 
 
-DRIVERS = {"langgraph": LangGraphDriver, "mem0": Mem0Driver, "mem0-infer": Mem0InferDriver}
+def load_doc_example() -> Any:
+    """The first Python block of docs/custom-stores.md, executed as a module (M1b-05)."""
+    import re
+    import types
+
+    doc = Path(__file__).resolve().parents[4] / "docs" / "custom-stores.md"
+    block = re.search(r"```python\n(.*?)```", doc.read_text(encoding="utf-8"), re.S)
+    assert block is not None
+    module = types.ModuleType("custom_store_example")
+    exec(compile(block.group(1), str(doc), "exec"), module.__dict__)  # noqa: S102 - our own docs
+    return module
+
+
+class RawDictDriver:
+    """The raw core API through the worked example in docs/custom-stores.md."""
+
+    name = "raw-dict"
+
+    def __init__(self, tmp: Path) -> None:
+        from mnemowall.core.api import MemoryGuard
+
+        self.ledger, self.quarantine = _open(tmp)
+        guard = MemoryGuard(
+            ledger=self.ledger, quarantine=self.quarantine, tenant_id=TENANT, store="notes"
+        )
+        self.store = load_doc_example().GuardedDictStore(guard)
+        self._keys = (f"k{i}" for i in itertools.count())
+
+    def _ns(self, principal: str) -> tuple[str, ...]:
+        return (*scope_prefix(TENANT, ScopeKind.USER, principal), "_raw", "notes", *NS)
+
+    @staticmethod
+    def _read(view: Any) -> Read | None:
+        if view is None:
+            return None
+        return Read(
+            raw=view.value["text"],
+            model_text=view.text,
+            label=view.label,
+            trust=view.trust,
+            verified=view.verified,
+            stale=view.stale,
+            memory_id=view.memory_id,
+            version_no=view.version_no,
+        )
+
+    def put(self, text: str) -> str | None:
+        key = next(self._keys)
+        decision = self.store.put(NS, key, {"text": text})
+        return None if decision.outcome == "quarantined" else key
+
+    def update(self, handle: str, text: str) -> None:
+        self.store.put(NS, handle, {"text": text})
+
+    def get(self, handle: str | None) -> Read | None:
+        return None if handle is None else self._read(self.store.get(NS, handle))
+
+    def search(self, query: str) -> list[Read]:
+        return [r for r in (self._read(v) for v in self.store.search(NS, query)) if r]
+
+    def delete(self, handle: str) -> None:
+        self.store.delete(NS, handle)
+
+    def rollback(self, memory_id: str, to_version: int) -> RollbackResult:
+        result: RollbackResult = self.store.rollback(memory_id, to_version)
+        return result
+
+    def deliver(self) -> dict[str, int]:
+        counts: dict[str, int] = self.store.deliver_reviewed()
+        return counts
+
+    def inner_texts(self, principal: str = "alice") -> list[str]:
+        ns = self._ns(principal)
+        return sorted(v["text"] for (n, _), v in self.store.rows.items() if n == ns)
+
+    def raw_plant(self, text: str) -> str:
+        key = next(self._keys)
+        self.store.rows[(self._ns("alice"), key)] = {"text": text}
+        return key
+
+    def raw_copy_to(self, handle: str, principal: str) -> str:
+        value = self.store.rows[(self._ns("alice"), handle)]
+        self.store.rows[(self._ns(principal), handle)] = dict(value)
+        return handle
+
+    def snapshot(self, handle: str) -> Any:
+        return dict(self.store.rows[(self._ns("alice"), handle)])
+
+    def raw_restore(self, handle: str, snap: Any) -> None:
+        self.store.rows[(self._ns("alice"), handle)] = snap
+
+    def close(self) -> None:
+        self.quarantine.close()
+        self.ledger.close()
+
+
+DRIVERS = {
+    "langgraph": LangGraphDriver,
+    "mem0": Mem0Driver,
+    "mem0-infer": Mem0InferDriver,
+    "raw-dict": RawDictDriver,
+}

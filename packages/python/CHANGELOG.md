@@ -34,7 +34,8 @@ First usable release (alpha).
   - trust is capped at what Mem0's model could have seen: memories in scope and the last 10 infer calls' messages (signed `infer` ledger events);
   - `provenance.trust_cap()` (lowers write trust only);
   - `doctor`: `infer_removed`, `infer_restored`, and `mem0_logs_content` when the `mem0` logger is below CRITICAL.
-- **Shared adapter contract suite:** the same tests run against LangGraph, Mem0 strict and Mem0 infer mode.
+- **Raw core API for custom stores** (`mnemowall.core.api.MemoryGuard`): `guard_write`/`guard_delete` decide and sign, the caller persists exactly what is returned; `guard_read` filters to the session's scope, verifies (with location binding), wraps, logs and registers reads; `rollback` and `deliver_reviewed` return decisions to apply. Guide and worked example: `docs/custom-stores.md`.
+- **Shared adapter contract suite:** the same tests run against LangGraph, Mem0 strict, Mem0 infer mode, and the custom-store example from the docs.
 - **Signed local policies:**
   - `mnemowall policy keygen/sign/verify` and `load_policy_file`;
   - a separate signing key, with only the public key pinned in the app;
