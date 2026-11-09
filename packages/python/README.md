@@ -106,6 +106,22 @@ Limits of the beta:
 - Scopes with 10,000 or more memories are refused (`scope_too_large`).
 - Each committed item costs one extra Mem0 `update` (one embedding call), and each `add` two extra listings of the scope.
 
+## Use with your own store
+
+No adapter for your database? `mnemowall.core.api.MemoryGuard` checks and signs each write and returns exactly what to persist (or tells you to persist nothing); `guard_read` verifies, wraps and logs rows before a model sees them.
+
+```python
+from mnemowall.core.api import MemoryGuard, StoredItem
+
+guard = MemoryGuard(ledger=ledger, quarantine=quarantine, tenant_id="acme", store="notes")
+decision = guard.guard_write(("prefs",), "tea", {"text": "I prefer green tea."})
+if decision.outcome == "store":
+    my_db.put(decision.namespace, decision.key, decision.value)  # exactly as returned
+views = guard.guard_read([StoredItem(ns, key, value) for ns, key, value in my_db.rows()])
+```
+
+The full guide and a worked, tested example are in [docs/custom-stores.md](../../docs/custom-stores.md). Code that writes to your store directly bypasses Mnemowall; such rows read back `unverified`.
+
 ## Local policies (signed)
 
 The built-in strict policy needs no file. To use your own, sign it with a key that never lives on the machine running the agent, and give the app only the public key:
